@@ -6,9 +6,18 @@
 //   PATCH  /watches/:id        update a watch
 //   DELETE /watches/:id        delete a watch and its history
 //   GET    /watches/:id/trips  cheapest trips from the latest check
+//   GET    /watches/:id/diagnose  live search showing how many fares each rule drops
 //   POST   /check              run check-prices now
 
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+import {
+  buildSearchPlan,
+  countRejections,
+  ticketsToTrips,
+  type TpTicket,
+  type Watch,
+} from "../check-prices/logic.ts";
+import { fetchTickets } from "../_shared/travelpayouts.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -82,10 +91,11 @@ Deno.serve(async (req) => {
       return json(data, 201);
     }
 
-    const match = path.match(/^\/watches\/(\d+)(\/trips)?$/);
+    const match = path.match(/^\/watches\/(\d+)(\/trips|\/diagnose)?$/);
     if (match) {
       const id = Number(match[1]);
-      if (match[2] && req.method === "GET") return json(await latestTrips(db, id));
+      if (match[2] === "/trips" && req.method === "GET") return json(await latestTrips(db, id));
+      if (match[2] === "/diagnose" && req.method === "GET") return json(await diagnose(db, id));
       if (!match[2] && req.method === "PATCH") {
         const { data, error } = await db.from("watches").update(pickWatchFields(await req.json()))
           .eq("id", id).select().single();
@@ -139,6 +149,43 @@ async function latestTrips(db: SupabaseClient, watchId: number) {
     .limit(30);
   if (tripsError) throw tripsError;
   return { checked_on: checkedOn, trips };
+}
+
+/**
+ * Run the watch's searches live (nothing is saved) and report, per search:
+ * how many round-trip fares the source returned, how many each rule rejected,
+ * and, as a baseline, how many one-way outbound fares exist on the route at all.
+ */
+async function diagnose(db: SupabaseClient, watchId: number) {
+  const { data: row, error } = await db.from("watches").select("*").eq("id", watchId).single();
+  if (error) throw error;
+  const watch: Watch = { ...row, drop_pct: Number(row.drop_pct) };
+  const today = new Date().toISOString().slice(0, 10);
+  const sample = (t: TpTicket) => ({
+    price: t.price, airline: t.airline, departure_at: t.departure_at, return_at: t.return_at,
+    transfers: t.transfers, return_transfers: t.return_transfers,
+    duration_to: t.duration_to, duration_back: t.duration_back,
+  });
+
+  const searches = [];
+  for (const search of buildSearchPlan(watch, today)) {
+    const result: Record<string, unknown> = { ...search };
+    try {
+      const roundTrip = await fetchTickets(search, { currency: watch.currency, directOnly: watch.max_transfers === 0 });
+      result.roundTrip = {
+        fares: roundTrip.length,
+        matching: ticketsToTrips(roundTrip, search, watch, today).length,
+        rejected: countRejections(roundTrip, watch, today),
+        cheapest: roundTrip.slice(0, 5).map(sample),
+      };
+      const oneWay = await fetchTickets(search, { currency: watch.currency, directOnly: false, oneWay: true });
+      result.oneWayOutbound = { fares: oneWay.length, cheapest: oneWay.slice(0, 3).map(sample) };
+    } catch (err) {
+      result.error = String(err);
+    }
+    searches.push(result);
+  }
+  return { today, watch: watch.name, searches };
 }
 
 async function runCheck(): Promise<Response> {

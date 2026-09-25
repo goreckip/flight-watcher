@@ -7,16 +7,16 @@ import {
   buildSearchPlan,
   cheapestPerRoute,
   cheapestPerTrip,
+  countRejections,
   evaluateRoute,
-  type SearchRequest,
   type TpTicket,
   type Trip,
   ticketsToTrips,
   type Watch,
 } from "./logic.ts";
 import { alertHtml, alertSubject, type PriceAlert } from "./email.ts";
+import { fetchTickets } from "../_shared/travelpayouts.ts";
 
-const TP_URL = "https://api.travelpayouts.com/aviasales/v3/prices_for_dates";
 const HISTORY_DAYS = 14;
 const ALERT_COOLDOWN_DAYS = 7;
 
@@ -62,9 +62,14 @@ async function run() {
     const plan = buildSearchPlan(watch, today);
 
     let trips: Trip[] = [];
+    const allTickets: TpTicket[] = [];
     for (const search of plan) {
       try {
-        const tickets = await fetchTickets(search, watch);
+        const tickets = await fetchTickets(search, {
+          currency: watch.currency,
+          directOnly: watch.max_transfers === 0,
+        });
+        allTickets.push(...tickets);
         trips.push(...ticketsToTrips(tickets, search, watch, today));
       } catch (err) {
         errors.push(`${watch.name} ${search.origin}-${search.destination} ${search.month}: ${err}`);
@@ -72,7 +77,13 @@ async function run() {
     }
     trips = cheapestPerTrip(trips);
     await saveSnapshots(db, watch, trips, today);
-    checked.push({ watch: watch.name, searches: plan.length, fares: trips.length });
+    checked.push({
+      watch: watch.name,
+      searches: plan.length,
+      faresFromSource: allTickets.length,
+      fares: trips.length,
+      rejected: countRejections(allTickets, watch, today),
+    });
 
     for (const best of cheapestPerRoute(trips)) {
       const history = await routeHistory(db, watch.id, best, today);
@@ -115,26 +126,6 @@ async function run() {
   return { date: today, watches: checked, alertsSent: alerts.length, routes, errors };
 }
 
-async function fetchTickets(search: SearchRequest, watch: Watch): Promise<TpTicket[]> {
-  const params = new URLSearchParams({
-    origin: search.origin,
-    destination: search.destination,
-    departure_at: search.month,
-    one_way: "false",
-    direct: String(watch.max_transfers === 0),
-    currency: watch.currency.toLowerCase(),
-    sorting: "price",
-    unique: "false",
-    limit: "1000",
-  });
-  const res = await fetch(`${TP_URL}?${params}`, {
-    headers: { "X-Access-Token": env("TRAVELPAYOUTS_TOKEN") },
-  });
-  if (!res.ok) throw new Error(`Travelpayouts HTTP ${res.status}: ${await res.text()}`);
-  const body = await res.json();
-  if (!body.success) throw new Error(`Travelpayouts error: ${JSON.stringify(body.error ?? body)}`);
-  return body.data ?? [];
-}
 
 async function saveSnapshots(db: SupabaseClient, watch: Watch, trips: Trip[], today: string) {
   if (trips.length === 0) return;

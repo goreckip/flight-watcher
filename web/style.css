@@ -123,7 +123,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
 .card-head { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
 .card-head h2 { font-size: 19px; }
 .criteria { margin: 6px 0 0; color: var(--text-2); font-size: 14px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
-.card-actions { display: flex; gap: 6px; align-items: center; }
+.card-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .pill {
   font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
   background: var(--surface-2); color: var(--text-2);
@@ -143,6 +143,18 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
   padding: 24px; text-align: center; color: var(--text-2);
   background: var(--surface-2); border-radius: 10px; font-size: 14px;
 }
+
+.diagnose {
+  margin-top: 16px; padding: 14px; border-radius: 10px;
+  background: var(--surface-2); display: grid; gap: 10px;
+}
+.diagnose h3 { font-size: 15px; }
+.diagnose td.wrap { white-space: normal; min-width: 200px; }
+.diagnose pre {
+  max-height: 320px; overflow: auto; font-size: 12px; margin: 8px 0 0;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px;
+}
+.diagnose [data-close] { justify-self: start; }
 
 details.trips { margin-top: 16px; }
 details.trips summary { cursor: pointer; font-weight: 550; font-size: 14px; }

@@ -4,6 +4,7 @@ import {
   buildSearchPlan,
   cheapestPerRoute,
   cheapestPerTrip,
+  countRejections,
   evaluateRoute,
   median,
   monthsBetween,
@@ -125,6 +126,31 @@ test("ticketsToTrips rejects returns after return_by", () => {
     "2026-09-25",
   );
   assert.deepEqual(trips.map((t) => t.return_date), ["2027-02-14"]);
+});
+
+test("countRejections explains why fares were dropped", () => {
+  const athens = { ...spain, depart_from: "2027-01-29", depart_to: "2027-02-09", return_by: "2027-02-14", stay_min: 5, stay_max: 7, max_transfers: 1, max_leg_minutes: 390 };
+  const counts = countRejections(
+    [
+      ticket("2027-02-01", "2027-02-07", 900, { transfers: 1, duration_to: 330, duration_back: 330 }), // matches
+      ticket("2027-02-01", "2027-02-07", 800, { transfers: 1 }), // unknown duration on a connection
+      ticket("2027-02-01", "2027-02-07", 700, { transfers: 2 }),
+      ticket("2027-02-09", "2027-02-15", 600),
+      ticket("2027-03-01", "2027-03-07", 500),
+      ticket("2027-02-01", "2027-02-03", 400),
+      ticket("2027-02-01", "2027-02-07", 300, { return_at: undefined }),
+    ],
+    athens,
+    "2026-09-25",
+  );
+  assert.deepEqual(counts, {
+    "journey-too-long-or-unknown": 1,
+    "too-many-stops": 1,
+    "back-too-late": 1,
+    "outside-departure-window": 1,
+    "stay-length": 1,
+    "no-return-flight": 1,
+  });
 });
 
 test("payingSeats counts adults and children aged 2+", () => {

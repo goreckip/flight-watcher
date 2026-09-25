@@ -53,14 +53,16 @@ async function run() {
   if (error) throw error;
 
   const alerts: PriceAlert[] = [];
+  const checked: Record<string, unknown>[] = [];
   const routes: Record<string, unknown>[] = [];
   const errors: string[] = [];
 
   for (const row of watches ?? []) {
     const watch: Watch = { ...row, drop_pct: Number(row.drop_pct) };
+    const plan = buildSearchPlan(watch, today);
 
     let trips: Trip[] = [];
-    for (const search of buildSearchPlan(watch, today)) {
+    for (const search of plan) {
       try {
         const tickets = await fetchTickets(search, watch);
         trips.push(...ticketsToTrips(tickets, search, watch, today));
@@ -70,6 +72,7 @@ async function run() {
     }
     trips = cheapestPerTrip(trips);
     await saveSnapshots(db, watch, trips, today);
+    checked.push({ watch: watch.name, searches: plan.length, fares: trips.length });
 
     for (const best of cheapestPerRoute(trips)) {
       const history = await routeHistory(db, watch.id, best, today);
@@ -109,7 +112,7 @@ async function run() {
     if (insertError) throw insertError;
   }
 
-  return { date: today, watches: watches?.length ?? 0, alertsSent: alerts.length, routes, errors };
+  return { date: today, watches: checked, alertsSent: alerts.length, routes, errors };
 }
 
 async function fetchTickets(search: SearchRequest, watch: Watch): Promise<TpTicket[]> {

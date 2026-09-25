@@ -1,5 +1,8 @@
 project_id = "flight-watcher"
 
+# Both functions do their own auth (shared secret / password) instead of requiring a Supabase JWT.
 [functions.check-prices]
-# Called by GitHub Actions with a shared secret header instead of a Supabase JWT.
+verify_jwt = false
+
+[functions.api]
 verify_jwt = false

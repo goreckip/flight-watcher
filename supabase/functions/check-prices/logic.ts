@@ -7,6 +7,7 @@ export interface Watch {
   destinations: string[];
   depart_from: string; // YYYY-MM-DD
   depart_to: string;
+  return_by: string | null; // latest allowed return date
   stay_min: number;
   stay_max: number;
   max_transfers: number; // per direction; 0 = direct only
@@ -116,6 +117,7 @@ export function ticketsToTrips(
     const depart = t.departure_at.slice(0, 10);
     const ret = t.return_at.slice(0, 10);
     if (depart < earliest || depart > watch.depart_to) continue;
+    if (watch.return_by && ret > watch.return_by) continue;
     const stay = daysBetween(depart, ret);
     if (stay < watch.stay_min || stay > watch.stay_max) continue;
     const outStops = t.transfers ?? 0;

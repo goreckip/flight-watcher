@@ -6,6 +6,8 @@
     "node": ">=23.6"
   },
   "scripts": {
-    "test": "node --test \"tests/**/*.test.ts\""
+    "test": "node --test \"tests/**/*.test.ts\"",
+    "check": "npx -y deno@2 check --node-modules-dir=none supabase/functions/check-prices/index.ts supabase/functions/api/index.ts",
+    "dev": "node scripts/serve.mjs"
   }
 }

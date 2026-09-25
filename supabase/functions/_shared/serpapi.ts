@@ -41,8 +41,39 @@ function googleFlightsUrl(watch: Watch, combo: DateCombo): string {
   return `https://www.google.com/travel/flights?q=${encodeURIComponent(q)}&curr=${watch.currency}`;
 }
 
+export interface GoogleSearchReport {
+  request: Record<string, string>; // without the API key
+  error: string | null;
+  priceLevel: string | null;
+  itineraries: {
+    price: number | null;
+    transfers: number;
+    totalDuration: number | null;
+    airlines: string;
+    via: string;
+    kept: boolean;
+    reason: string | null;
+  }[];
+  fares: GoogleFare[];
+}
+
 /** Cheapest fare per actual route for one date pair. Throws on API errors; "no results" returns []. */
 export async function searchGoogleFlights(watch: Watch, combo: DateCombo): Promise<GoogleFare[]> {
+  const report = await googleSearchReport(watch, combo);
+  if (report.error) throw new Error(report.error);
+  return report.fares;
+}
+
+/**
+ * One Google Flights search with a full account of what came back and why each itinerary
+ * was kept or dropped. `googleFilters: false` leaves the stop/duration filters off the request
+ * (our own checks still run), to see what the filters hide.
+ */
+export async function googleSearchReport(
+  watch: Watch,
+  combo: DateCombo,
+  googleFilters = true,
+): Promise<GoogleSearchReport> {
   const key = Deno.env.get("SERPAPI_KEY");
   if (!key) throw new Error("Missing env var SERPAPI_KEY");
 
@@ -60,31 +91,63 @@ export async function searchGoogleFlights(watch: Watch, combo: DateCombo): Promi
     adults: String(pax.adults),
     children: String(pax.children),
     infants_on_lap: String(pax.infants_on_lap),
-    stops: stopsParam(watch.max_transfers),
     sort_by: "2",
-    api_key: key,
   });
-  if (watch.max_leg_minutes) params.set("max_duration", String(watch.max_leg_minutes));
+  if (googleFilters) {
+    params.set("stops", stopsParam(watch.max_transfers));
+    if (watch.max_leg_minutes) params.set("max_duration", String(watch.max_leg_minutes));
+  }
+  const report: GoogleSearchReport = {
+    request: Object.fromEntries(params),
+    error: null,
+    priceLevel: null,
+    itineraries: [],
+    fares: [],
+  };
+  params.set("api_key", key);
 
   const res = await fetch(`${ENDPOINT}?${params}`);
   const body = await res.json().catch(() => ({}));
   if (body.error) {
-    if (/hasn't returned any results|no results/i.test(body.error)) return [];
-    throw new Error(`SerpApi: ${body.error}`);
+    if (!/hasn't returned any results|no results/i.test(body.error)) report.error = `SerpApi: ${body.error}`;
+    return report;
   }
-  if (!res.ok) throw new Error(`SerpApi HTTP ${res.status}`);
+  if (!res.ok) {
+    report.error = `SerpApi HTTP ${res.status}`;
+    return report;
+  }
 
   const itineraries: SerpItinerary[] = [...(body.best_flights ?? []), ...(body.other_flights ?? [])];
   const seats = payingSeats(watch);
-  const priceLevel: string | null = body.price_insights?.price_level ?? null;
+  report.priceLevel = body.price_insights?.price_level ?? null;
 
   const best = new Map<string, GoogleFare>();
   for (const it of itineraries) {
     const legs = it.flights ?? [];
-    if (!legs.length || !(typeof it.price === "number" && it.price > 0)) continue;
     const transfers = (it.layovers ?? []).length;
-    if (transfers > watch.max_transfers) continue;
-    if (watch.max_leg_minutes && (it.total_duration ?? 0) > watch.max_leg_minutes) continue;
+    const row = {
+      price: typeof it.price === "number" ? it.price : null,
+      transfers,
+      totalDuration: it.total_duration ?? null,
+      airlines: [...new Set(legs.map((l) => l.airline).filter(Boolean))].join(" + "),
+      via: legs.slice(0, -1).map((l) => l.arrival_airport?.id).filter(Boolean).join(", "),
+      kept: false,
+      reason: null as string | null,
+    };
+    report.itineraries.push(row);
+    if (!legs.length || !(typeof it.price === "number" && it.price > 0)) {
+      row.reason = "no price";
+      continue;
+    }
+    if (transfers > watch.max_transfers) {
+      row.reason = "too many stops";
+      continue;
+    }
+    if (watch.max_leg_minutes && (it.total_duration ?? 0) > watch.max_leg_minutes) {
+      row.reason = "outbound too long";
+      continue;
+    }
+    row.kept = true;
 
     const origin = legs[0].departure_airport?.id ?? watch.origins[0];
     const destination = legs.at(-1)!.arrival_airport?.id ?? watch.destinations[0];
@@ -95,7 +158,7 @@ export async function searchGoogleFlights(watch: Watch, combo: DateCombo): Promi
       return_date: combo.ret,
       price: Math.round(it.price / seats),
       price_total: it.price,
-      price_level: priceLevel,
+      price_level: report.priceLevel,
       airline: [...new Set(legs.map((l) => l.airline).filter(Boolean))].join(" + ") || null,
       transfers,
       duration_to: it.total_duration ?? null,
@@ -106,7 +169,8 @@ export async function searchGoogleFlights(watch: Watch, combo: DateCombo): Promi
     const current = best.get(routeKey);
     if (!current || fare.price_total < current.price_total) best.set(routeKey, fare);
   }
-  return [...best.values()];
+  report.fares = [...best.values()];
+  return report;
 }
 
 /** Remaining searches this month (the Account API is free and doesn't use quota). */

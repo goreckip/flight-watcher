@@ -118,7 +118,7 @@ async function fetchTickets(search: SearchRequest, watch: Watch): Promise<TpTick
     destination: search.destination,
     departure_at: search.month,
     one_way: "false",
-    direct: String(watch.direct_only),
+    direct: String(watch.max_transfers === 0),
     currency: watch.currency.toLowerCase(),
     sorting: "price",
     unique: "false",

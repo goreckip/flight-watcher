@@ -4,7 +4,7 @@ A personal agent that checks flight prices every day and emails you when a fare 
 
 ## What it does
 
-- Monitors "watches": origins, destinations, a departure window, a stay length, and direct-only if you want it
+- Monitors "watches": origins, destinations, a departure window, a stay length, max stops, max journey time per direction, and who's travelling (for a family price estimate)
 - Stores daily price snapshots so you can see price trends
 - Emails an alert when a price drops more than your threshold (e.g. 10%) below its recent median
 

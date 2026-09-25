@@ -185,7 +185,33 @@ async function diagnose(db: SupabaseClient, watchId: number) {
     }
     searches.push(result);
   }
-  return { today, watch: watch.name, searches };
+
+  // Probes to tell "no data for this route" apart from "API/market problem".
+  const nextMonth = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 7);
+  const origin = watch.origins[0];
+  const destination = watch.destinations[0];
+  const probeDefs: { label: string; origin: string; destination: string; month: string; market?: string }[] = [
+    { label: `Sanity: WAW→LON ${nextMonth}, one-way`, origin: "WAW", destination: "LON", month: nextMonth },
+    { label: `${origin}→${destination} any date, one-way`, origin, destination, month: "" },
+    { label: `${origin}→${destination} ${nextMonth}, one-way`, origin, destination, month: nextMonth },
+    ...["pl", "us", "gb", "de"].map((market) => ({
+      label: `${origin}→${destination} any date, one-way, market=${market}`, origin, destination, month: "", market,
+    })),
+  ];
+  const probes = [];
+  for (const p of probeDefs) {
+    try {
+      const tickets = await fetchTickets(
+        { origin: p.origin, destination: p.destination, month: p.month },
+        { currency: watch.currency, directOnly: false, oneWay: true, market: p.market },
+      );
+      probes.push({ label: p.label, fares: tickets.length, cheapest: tickets.slice(0, 2).map(sample) });
+    } catch (err) {
+      probes.push({ label: p.label, error: String(err) });
+    }
+  }
+
+  return { today, watch: watch.name, searches, probes };
 }
 
 async function runCheck(): Promise<Response> {

@@ -12,14 +12,16 @@ jobs:
       - name: Run check-prices
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        # Logs are public on a public repo, so print only totals, not routes, dates or prices.
+        # Full details are on the dashboard.
         run: |
           curl --fail-with-body -sS -X POST \
             -H "x-cron-secret: $CRON_SECRET" \
             --max-time 150 \
+            -o result.json \
             https://uorpnghoagbnwrdyrgre.supabase.co/functions/v1/check-prices \
-            | tee result.json
-          echo
-          echo "### Price check" >> "$GITHUB_STEP_SUMMARY"
-          echo '```json' >> "$GITHUB_STEP_SUMMARY"
-          cat result.json >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+            || { echo "check-prices failed (details in Supabase → Edge Functions → Logs)"; exit 1; }
+          summary=$(jq -r '"Watches: \(.watches | length) · fares found: \([.watches[].fares] | add // 0) · alerts sent: \(.alertsSent) · search errors: \(.errors | length)"' result.json)
+          echo "$summary"
+          echo "### Price check: $summary" >> "$GITHUB_STEP_SUMMARY"
+          rm result.json

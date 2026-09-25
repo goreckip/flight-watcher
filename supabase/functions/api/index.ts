@@ -5,19 +5,25 @@
 //   POST   /watches            create a watch
 //   PATCH  /watches/:id        update a watch
 //   DELETE /watches/:id        delete a watch and its history
-//   GET    /watches/:id/trips  cheapest trips from the latest check
+//   GET    /watches/:id/trips  latest known fare per date pair (both sources)
 //   GET    /watches/:id/diagnose  live search showing how many fares each rule drops
 //   POST   /check              run check-prices now
 
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import {
+  addDays,
   buildSearchPlan,
+  comboKey,
   countRejections,
   ticketsToTrips,
   type TpTicket,
+  tripCombos,
   type Watch,
 } from "../check-prices/logic.ts";
 import { fetchTickets } from "../_shared/travelpayouts.ts";
+import { serpApiAccount } from "../_shared/serpapi.ts";
+
+const GOOGLE_FRESH_DAYS = 12; // matches route_daily_best
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -118,37 +124,64 @@ Deno.serve(async (req) => {
 });
 
 async function overview(db: SupabaseClient) {
-  const since = new Date(Date.now() - HISTORY_DAYS * 86_400_000).toISOString().slice(0, 10);
-  const [watches, daily, alerts] = await Promise.all([
+  const today = new Date().toISOString().slice(0, 10);
+  const since = addDays(today, -HISTORY_DAYS);
+  const [watches, daily, alerts, log, account] = await Promise.all([
     db.from("watches").select("*").order("created_at"),
-    db.from("route_daily_min")
-      .select("watch_id, origin, destination, checked_on, price, currency, depart_date, return_date, airline")
+    db.from("route_daily_best")
+      .select("watch_id, origin, destination, checked_on, price, price_total, price_level, currency, depart_date, return_date, airline, source")
       .gte("checked_on", since)
       .order("checked_on"),
     db.from("alerts").select("*").order("sent_at", { ascending: false }).limit(20),
+    db.from("search_log").select("watch_id, depart_date, return_date")
+      .eq("source", "google").gt("checked_on", addDays(today, -GOOGLE_FRESH_DAYS)),
+    serpApiAccount().catch(() => null),
   ]);
-  for (const result of [watches, daily, alerts]) if (result.error) throw result.error;
-  return { watches: watches.data, daily: daily.data, alerts: alerts.data };
+  for (const result of [watches, daily, alerts, log]) if (result.error) throw result.error;
+
+  // How many of each watch's date pairs Google has looked at recently.
+  const googleCoverage: Record<number, { checked: number; total: number }> = {};
+  for (const row of watches.data ?? []) {
+    const watch: Watch = { ...row, drop_pct: Number(row.drop_pct) };
+    const keys = new Set(tripCombos(watch, today).map(comboKey));
+    const checked = new Set(
+      (log.data ?? []).filter((r) => r.watch_id === watch.id)
+        .map((r) => comboKey({ depart: r.depart_date, ret: r.return_date }))
+        .filter((k) => keys.has(k)),
+    );
+    googleCoverage[watch.id] = { checked: checked.size, total: keys.size };
+  }
+
+  return {
+    watches: watches.data,
+    daily: daily.data,
+    alerts: alerts.data,
+    google: { enabled: Boolean(Deno.env.get("SERPAPI_KEY")), account, coverage: googleCoverage, freshDays: GOOGLE_FRESH_DAYS },
+  };
 }
 
+/** Latest known fare for each date pair: today's Aviasales fares plus Google fares from the last 12 days. */
 async function latestTrips(db: SupabaseClient, watchId: number) {
-  const { data: latest, error } = await db.from("price_snapshots")
-    .select("checked_on")
-    .eq("watch_id", watchId)
-    .order("checked_on", { ascending: false })
-    .limit(1);
-  if (error) throw error;
-  if (!latest?.length) return { checked_on: null, trips: [] };
-
-  const checkedOn = latest[0].checked_on;
-  const { data: trips, error: tripsError } = await db.from("price_snapshots")
+  const today = new Date().toISOString().slice(0, 10);
+  const { data, error } = await db.from("price_snapshots")
     .select("*")
     .eq("watch_id", watchId)
-    .eq("checked_on", checkedOn)
-    .order("price")
-    .limit(30);
-  if (tripsError) throw tripsError;
-  return { checked_on: checkedOn, trips };
+    .gt("checked_on", addDays(today, -GOOGLE_FRESH_DAYS))
+    .order("checked_on", { ascending: false })
+    .limit(2000);
+  if (error) throw error;
+  if (!data?.length) return { checked_on: null, trips: [] };
+
+  const latestTp = data.find((r) => r.source === "travelpayouts")?.checked_on;
+  const seen = new Set<string>();
+  const trips = data.filter((r) => {
+    if (r.source === "travelpayouts" && r.checked_on !== latestTp) return false;
+    const key = `${r.source}|${r.origin}|${r.destination}|${r.depart_date}|${r.return_date}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).sort((a, b) => Number(a.price) - Number(b.price)).slice(0, 30);
+  return { checked_on: data[0].checked_on, trips };
 }
 
 /**

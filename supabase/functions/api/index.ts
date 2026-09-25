@@ -9,6 +9,7 @@
 //   GET    /watches/:id/diagnose  live search showing how many fares each rule drops
 //   POST   /watches/:id/google-test  one Google search for chosen dates, with a full report (uses 1 search)
 //   POST   /check              run check-prices now
+//   POST   /test-email         send a sample alert (built from a real current fare) to ALERT_EMAIL_TO
 
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import {
@@ -23,6 +24,8 @@ import {
 } from "../check-prices/logic.ts";
 import { fetchTickets } from "../_shared/travelpayouts.ts";
 import { googleSearchReport, serpApiAccount } from "../_shared/serpapi.ts";
+import { sendEmail } from "../_shared/resend.ts";
+import { alertHtml, alertSubject, type PriceAlert } from "../check-prices/email.ts";
 
 const GOOGLE_FRESH_DAYS = 12; // matches route_daily_best
 
@@ -90,6 +93,7 @@ Deno.serve(async (req) => {
     if (req.method === "GET" && path === "/auth") return json({ ok: true });
     if (req.method === "GET" && path === "/overview") return json(await overview(db));
     if (req.method === "POST" && path === "/check") return await runCheck();
+    if (req.method === "POST" && path === "/test-email") return json(await testEmail(db));
 
     if (req.method === "POST" && path === "/watches") {
       const { data, error } = await db.from("watches").insert(pickWatchFields(await req.json()))
@@ -282,6 +286,39 @@ async function googleTest(db: SupabaseClient, watchId: number, body: { depart?: 
   });
   if (logError) throw logError;
   return report;
+}
+
+/** Sample alert using the most recent best fare, so the email looks exactly like a real one. */
+async function testEmail(db: SupabaseClient) {
+  const { data: best, error } = await db.from("route_daily_best")
+    .select("*").order("checked_on", { ascending: false }).order("price").limit(1);
+  if (error) throw error;
+  if (!best?.length) throw new Error("No fares recorded yet. Run a price check first.");
+  const row = best[0];
+
+  const { data: w, error: watchError } = await db.from("watches").select("*").eq("id", row.watch_id).single();
+  if (watchError) throw watchError;
+  const watch: Watch = { ...w, drop_pct: Number(w.drop_pct) };
+
+  const price = Number(row.price);
+  const alert: PriceAlert = {
+    watch,
+    trip: {
+      origin: row.origin, destination: row.destination,
+      depart_date: row.depart_date, return_date: row.return_date,
+      price,
+      price_total: row.price_total == null ? null : Number(row.price_total),
+      price_level: row.price_level, source: row.source,
+      airline: row.airline, transfers: row.transfers,
+      duration_to: row.duration_to, duration_back: row.duration_back, link: row.link,
+    },
+    baseline: Math.round(price / 0.88), // pretend it fell 12%
+    dropPct: 12,
+  };
+  const note = `<p style="background:#fff7d6;padding:8px 12px;border-radius:6px;font-family:system-ui,sans-serif;font-size:14px">
+    <b>Test email.</b> The fare below is real, but the drop is made up to show what an alert looks like.</p>`;
+  const sent = await sendEmail(`[TEST] ${alertSubject([alert])}`, note + alertHtml([alert]));
+  return { ok: true, to: sent.to, id: sent.id };
 }
 
 async function runCheck(): Promise<Response> {

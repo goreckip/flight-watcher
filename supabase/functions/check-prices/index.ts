@@ -19,6 +19,7 @@ import {
 import { type AlertTrip, alertHtml, alertSubject, type PriceAlert } from "./email.ts";
 import { fetchTickets } from "../_shared/travelpayouts.ts";
 import { searchGoogleFlights } from "../_shared/serpapi.ts";
+import { sendEmail } from "../_shared/resend.ts";
 
 const HISTORY_DAYS = 14;
 const ALERT_COOLDOWN_DAYS = 7;
@@ -152,7 +153,7 @@ async function run() {
   }
 
   if (alerts.length > 0) {
-    await sendEmail(alerts);
+    await sendAlertEmail(alerts);
     // Recorded only after a successful send, so a failed email is retried next run.
     const { error: insertError } = await db.from("alerts").insert(
       alerts.map(({ watch, trip, baseline, dropPct }) => ({
@@ -268,19 +269,6 @@ async function recentAlertPrices(db: SupabaseClient, watchId: number, trip: Trip
   return (data ?? []).map((r) => Number(r.price));
 }
 
-async function sendEmail(alerts: PriceAlert[]) {
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${env("RESEND_API_KEY")}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      from: Deno.env.get("ALERT_EMAIL_FROM") ?? "Flight Watcher <onboarding@resend.dev>",
-      to: env("ALERT_EMAIL_TO").split(",").map((s) => s.trim()),
-      subject: alertSubject(alerts),
-      html: alertHtml(alerts),
-    }),
-  });
-  if (!res.ok) throw new Error(`Resend HTTP ${res.status}: ${await res.text()}`);
+async function sendAlertEmail(alerts: PriceAlert[]) {
+  await sendEmail(alertSubject(alerts), alertHtml(alerts));
 }

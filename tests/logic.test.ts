@@ -7,6 +7,7 @@ import {
   evaluateRoute,
   median,
   monthsBetween,
+  payingSeats,
   ticketsToTrips,
 } from "../supabase/functions/check-prices/logic.ts";
 import type { TpTicket, Trip, Watch } from "../supabase/functions/check-prices/logic.ts";
@@ -20,9 +21,12 @@ const spain: Watch = {
   depart_to: "2027-06-20",
   stay_min: 5,
   stay_max: 8,
-  direct_only: true,
+  max_transfers: 0,
+  max_leg_minutes: null,
   drop_pct: 10,
   currency: "PLN",
+  adults: 1,
+  child_ages: [],
 };
 
 const ticket = (depart: string, ret: string, price: number, extra: Partial<TpTicket> = {}): TpTicket => ({
@@ -72,15 +76,49 @@ test("ticketsToTrips applies date window, stay length and direct-only", () => {
   assert.equal(trips[0].link, "https://www.aviasales.com/search/x");
 });
 
-test("ticketsToTrips keeps connections when direct_only is false", () => {
+test("ticketsToTrips allows up to max_transfers stops", () => {
   const req = { origin: "GDN", destination: "BCN", month: "2027-05" };
-  const trips = ticketsToTrips([ticket("2027-05-12", "2027-05-18", 250, { transfers: 1 })], req, { ...spain, direct_only: false }, "2026-09-25");
+  const oneStop = { ...spain, max_transfers: 1 };
+  const trips = ticketsToTrips(
+    [
+      ticket("2027-05-12", "2027-05-18", 250, { transfers: 1 }),
+      ticket("2027-05-12", "2027-05-18", 200, { return_transfers: 2 }),
+    ],
+    req,
+    oneStop,
+    "2026-09-25",
+  );
   assert.equal(trips.length, 1);
   assert.equal(trips[0].transfers, 1);
 });
 
+test("ticketsToTrips enforces max journey time per direction", () => {
+  const req = { origin: "GDN", destination: "ATH", month: "2027-02" };
+  const athens = { ...spain, depart_from: "2027-01-29", depart_to: "2027-02-14", max_transfers: 1, max_leg_minutes: 390 };
+  const trips = ticketsToTrips(
+    [
+      ticket("2027-02-01", "2027-02-07", 900, { transfers: 1, return_transfers: 1, duration_to: 330, duration_back: 385 }), // ok
+      ticket("2027-02-01", "2027-02-07", 700, { transfers: 1, duration_to: 480, duration_back: 200 }), // outbound too long
+      ticket("2027-02-01", "2027-02-07", 650, { return_transfers: 1, duration_to: 200, duration_back: 420 }), // return too long
+      ticket("2027-02-02", "2027-02-08", 600, { transfers: 1 }), // connection with unknown time: rejected
+      ticket("2027-02-03", "2027-02-09", 800), // direct with unknown time: kept
+    ],
+    req,
+    athens,
+    "2026-09-25",
+  );
+  assert.deepEqual(trips.map((t) => t.price).sort(), [800, 900]);
+  assert.equal(trips.find((t) => t.price === 900)!.duration_back, 385);
+});
+
+test("payingSeats counts adults and children aged 2+", () => {
+  assert.equal(payingSeats({ ...spain, adults: 2, child_ages: [3, 7, 9] }), 5);
+  assert.equal(payingSeats({ ...spain, adults: 2, child_ages: [1, 4] }), 3);
+});
+
 const trip = (destination: string, depart: string, price: number): Trip => ({
-  origin: "GDN", destination, depart_date: depart, return_date: "2027-05-20", price, airline: null, transfers: 0, link: null,
+  origin: "GDN", destination, depart_date: depart, return_date: "2027-05-20", price, airline: null, transfers: 0,
+  duration_to: null, duration_back: null, link: null,
 });
 
 test("cheapestPerTrip and cheapestPerRoute keep the lowest fare", () => {

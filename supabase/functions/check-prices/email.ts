@@ -1,4 +1,4 @@
-import type { Trip, Watch } from "./logic.ts";
+import { payingSeats, type Trip, type Watch } from "./logic.ts";
 
 export interface PriceAlert {
   watch: Watch;
@@ -19,10 +19,19 @@ function money(amount: number, currency: string): string {
   return `${Math.round(amount).toLocaleString("pl-PL")} ${currency}`;
 }
 
+function hours(minutes: number | null): string {
+  if (!minutes) return "?";
+  return `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, "0")}`;
+}
+
 export function alertSubject(alerts: PriceAlert[]): string {
   if (alerts.length === 1) {
     const { trip, watch, dropPct } = alerts[0];
-    return `Price drop: ${trip.origin}→${trip.destination} ${money(trip.price, watch.currency)} (−${dropPct}%)`;
+    const seats = payingSeats(watch);
+    const price = seats > 1
+      ? `~${money(trip.price * seats, watch.currency)} for ${seats}`
+      : money(trip.price, watch.currency);
+    return `Price drop: ${trip.origin}→${trip.destination} ${price} (−${dropPct}%)`;
   }
   return `${alerts.length} flight price drops`;
 }
@@ -31,11 +40,13 @@ export function alertHtml(alerts: PriceAlert[]): string {
   const rows = alerts.map(({ watch, trip, baseline, dropPct }) => {
     const nights = Math.round((Date.parse(trip.return_date) - Date.parse(trip.depart_date)) / 86_400_000);
     const book = trip.link ? `<a href="${escapeHtml(trip.link)}">View</a>` : "";
+    const seats = payingSeats(watch);
     return `<tr>
       <td>${escapeHtml(watch.name)}</td>
       <td><b>${escapeHtml(trip.origin)} → ${escapeHtml(trip.destination)}</b><br>
-        <small>${trip.depart_date} – ${trip.return_date} (${nights} nights)${trip.airline ? ` · ${escapeHtml(trip.airline)}` : ""}${trip.transfers ? ` · ${trip.transfers} stop(s)` : " · direct"}</small></td>
-      <td><b>${money(trip.price, watch.currency)}</b></td>
+        <small>${trip.depart_date} – ${trip.return_date} (${nights} nights)${trip.airline ? ` · ${escapeHtml(trip.airline)}` : ""}${trip.transfers ? ` · max ${trip.transfers} stop(s)` : " · direct"}<br>
+        Journey: ${hours(trip.duration_to)} out / ${hours(trip.duration_back)} back</small></td>
+      <td><b>${money(trip.price, watch.currency)}</b> / person${seats > 1 ? `<br><small>~${money(trip.price * seats, watch.currency)} for ${seats} seats</small>` : ""}</td>
       <td>${money(baseline, watch.currency)}</td>
       <td style="color:#15803d"><b>−${dropPct}%</b></td>
       <td>${book}</td>
@@ -50,6 +61,6 @@ export function alertHtml(alerts: PriceAlert[]): string {
     </thead>
     <tbody>${rows}</tbody>
   </table>
-  <p style="color:#666;font-size:12px">Prices come from cached searches and can change quickly, so check the final price before you book.</p>
+  <p style="color:#666;font-size:12px">Prices come from cached searches for one adult and can change quickly. The family total is an estimate (children aged 2+ usually pay the adult fare), and there may not be enough seats left at this price for everyone, so check the final price before you book.</p>
 </div>`;
 }

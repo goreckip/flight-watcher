@@ -9,9 +9,12 @@ export interface Watch {
   depart_to: string;
   stay_min: number;
   stay_max: number;
-  direct_only: boolean;
+  max_transfers: number; // per direction; 0 = direct only
+  max_leg_minutes: number | null; // max journey time per direction
   drop_pct: number;
   currency: string;
+  adults: number;
+  child_ages: number[];
 }
 
 export interface SearchRequest {
@@ -28,6 +31,8 @@ export interface TpTicket {
   return_at?: string;
   transfers?: number;
   return_transfers?: number;
+  duration_to?: number; // minutes
+  duration_back?: number;
   link?: string;
 }
 
@@ -39,6 +44,8 @@ export interface Trip {
   price: number;
   airline: string | null;
   transfers: number;
+  duration_to: number | null;
+  duration_back: number | null;
   link: string | null;
 }
 
@@ -88,7 +95,14 @@ export function buildSearchPlan(watch: Watch, today: string): SearchRequest[] {
   return plan;
 }
 
-/** Keep only round trips that fit the watch's date window, stay length and direct-only rule. */
+/** True if a leg's journey time is within the limit. Unknown times pass only for direct flights. */
+function legFits(minutes: number | undefined, transfers: number, limit: number | null): boolean {
+  if (limit === null) return true;
+  if (minutes === undefined || minutes <= 0) return transfers === 0;
+  return minutes <= limit;
+}
+
+/** Keep only round trips that fit the watch's date window, stay length, stops and journey-time rules. */
 export function ticketsToTrips(
   tickets: TpTicket[],
   req: SearchRequest,
@@ -104,8 +118,12 @@ export function ticketsToTrips(
     if (depart < earliest || depart > watch.depart_to) continue;
     const stay = daysBetween(depart, ret);
     if (stay < watch.stay_min || stay > watch.stay_max) continue;
-    const transfers = Math.max(t.transfers ?? 0, t.return_transfers ?? 0);
-    if (watch.direct_only && transfers > 0) continue;
+    const outStops = t.transfers ?? 0;
+    const backStops = t.return_transfers ?? 0;
+    const transfers = Math.max(outStops, backStops);
+    if (transfers > watch.max_transfers) continue;
+    if (!legFits(t.duration_to, outStops, watch.max_leg_minutes)) continue;
+    if (!legFits(t.duration_back, backStops, watch.max_leg_minutes)) continue;
     trips.push({
       origin: req.origin,
       destination: req.destination,
@@ -114,10 +132,21 @@ export function ticketsToTrips(
       price: t.price,
       airline: t.airline ?? null,
       transfers,
+      duration_to: t.duration_to ?? null,
+      duration_back: t.duration_back ?? null,
       link: t.link ? `https://www.aviasales.com${t.link}` : null,
     });
   }
   return trips;
+}
+
+/**
+ * Fares are quoted per adult. Children aged 2+ need their own seat and low-cost airlines
+ * charge them the adult fare, so they count as full seats. Infants (<2) fly on a lap for a
+ * small fee and are left out of the estimate.
+ */
+export function payingSeats(watch: Watch): number {
+  return watch.adults + watch.child_ages.filter((age) => age >= 2).length;
 }
 
 /** Collapse duplicates (same route + dates) to the cheapest fare. */

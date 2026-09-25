@@ -103,6 +103,44 @@ function legFits(minutes: number | undefined, transfers: number, limit: number |
   return minutes <= limit;
 }
 
+export type RejectReason =
+  | "no-return-flight"
+  | "outside-departure-window"
+  | "back-too-late"
+  | "stay-length"
+  | "too-many-stops"
+  | "journey-too-long-or-unknown";
+
+/** Why a fare doesn't match the watch, or null if it does. */
+export function rejectReason(t: TpTicket, watch: Watch, today: string): RejectReason | null {
+  const earliest = watch.depart_from > today ? watch.depart_from : today;
+  if (!t.return_at || !(t.price > 0)) return "no-return-flight";
+  const depart = t.departure_at.slice(0, 10);
+  const ret = t.return_at.slice(0, 10);
+  if (depart < earliest || depart > watch.depart_to) return "outside-departure-window";
+  if (watch.return_by && ret > watch.return_by) return "back-too-late";
+  const stay = daysBetween(depart, ret);
+  if (stay < watch.stay_min || stay > watch.stay_max) return "stay-length";
+  const outStops = t.transfers ?? 0;
+  const backStops = t.return_transfers ?? 0;
+  if (Math.max(outStops, backStops) > watch.max_transfers) return "too-many-stops";
+  if (
+    !legFits(t.duration_to, outStops, watch.max_leg_minutes) ||
+    !legFits(t.duration_back, backStops, watch.max_leg_minutes)
+  ) return "journey-too-long-or-unknown";
+  return null;
+}
+
+/** How many fares were dropped by each rule. */
+export function countRejections(tickets: TpTicket[], watch: Watch, today: string): Partial<Record<RejectReason, number>> {
+  const counts: Partial<Record<RejectReason, number>> = {};
+  for (const t of tickets) {
+    const reason = rejectReason(t, watch, today);
+    if (reason) counts[reason] = (counts[reason] ?? 0) + 1;
+  }
+  return counts;
+}
+
 /** Keep only round trips that fit the watch's date window, stay length, stops and journey-time rules. */
 export function ticketsToTrips(
   tickets: TpTicket[],
@@ -110,22 +148,12 @@ export function ticketsToTrips(
   watch: Watch,
   today: string,
 ): Trip[] {
-  const earliest = watch.depart_from > today ? watch.depart_from : today;
   const trips: Trip[] = [];
   for (const t of tickets) {
-    if (!t.return_at || !(t.price > 0)) continue;
+    if (rejectReason(t, watch, today)) continue;
     const depart = t.departure_at.slice(0, 10);
-    const ret = t.return_at.slice(0, 10);
-    if (depart < earliest || depart > watch.depart_to) continue;
-    if (watch.return_by && ret > watch.return_by) continue;
-    const stay = daysBetween(depart, ret);
-    if (stay < watch.stay_min || stay > watch.stay_max) continue;
-    const outStops = t.transfers ?? 0;
-    const backStops = t.return_transfers ?? 0;
-    const transfers = Math.max(outStops, backStops);
-    if (transfers > watch.max_transfers) continue;
-    if (!legFits(t.duration_to, outStops, watch.max_leg_minutes)) continue;
-    if (!legFits(t.duration_back, backStops, watch.max_leg_minutes)) continue;
+    const ret = t.return_at!.slice(0, 10);
+    const transfers = Math.max(t.transfers ?? 0, t.return_transfers ?? 0);
     trips.push({
       origin: req.origin,
       destination: req.destination,

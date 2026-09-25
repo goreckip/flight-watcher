@@ -197,11 +197,13 @@ function watchCard(watch) {
         <p class="criteria">${criteria}</p>
       </div>
       <div class="card-actions">
+        <button class="btn btn-small" data-action="diagnose" type="button" title="Run the searches live and show why fares are filtered out">Diagnose</button>
         <button class="btn btn-small" data-action="toggle" type="button">${watch.active ? "Pause" : "Resume"}</button>
         <button class="btn btn-small" data-action="edit" type="button">Edit</button>
         <button class="btn btn-small btn-ghost btn-danger" data-action="delete" type="button">Delete</button>
       </div>
     </header>
+    <div class="diagnose" hidden></div>
     ${body}
   </article>`;
 }
@@ -335,6 +337,62 @@ async function loadTrips(card, watch) {
   }
 }
 
+// ---------- diagnose ----------
+
+const REJECT_LABELS = {
+  "no-return-flight": "no return flight",
+  "outside-departure-window": "departure outside window",
+  "back-too-late": "back after “back by”",
+  "stay-length": "wrong number of nights",
+  "too-many-stops": "too many stops",
+  "journey-too-long-or-unknown": "journey too long / time unknown",
+};
+
+const rejectedText = (rejected) =>
+  Object.entries(rejected ?? {}).sort((a, b) => b[1] - a[1])
+    .map(([k, n]) => `${n} ${REJECT_LABELS[k] ?? k}`).join(", ") || "–";
+
+async function runDiagnose(card, watch, button) {
+  const panel = $(".diagnose", card);
+  panel.hidden = false;
+  panel.innerHTML = `<p class="muted small">Running live searches… this can take up to a minute.</p>`;
+  button.disabled = true;
+  try {
+    const result = DEMO
+      ? (() => { throw new Error("Demo mode: diagnose needs the real API."); })()
+      : await api("GET", `/watches/${watch.id}/diagnose`);
+    const rows = result.searches.map((s) => s.error
+      ? `<tr><td>${esc(s.origin)} → ${esc(s.destination)}</td><td>${esc(s.month)}</td><td colspan="4" class="error">${esc(s.error)}</td></tr>`
+      : `<tr>
+          <td>${esc(s.origin)} → ${esc(s.destination)}</td>
+          <td>${esc(s.month)}</td>
+          <td class="num">${s.roundTrip.fares}</td>
+          <td class="num"><b>${s.roundTrip.matching}</b></td>
+          <td class="wrap">${esc(rejectedText(s.roundTrip.rejected))}</td>
+          <td class="num">${s.oneWayOutbound.fares}</td>
+        </tr>`).join("");
+    const json = JSON.stringify(result, null, 2);
+    panel.innerHTML = `<h3>Diagnosis <span class="muted small">(live, nothing saved)</span></h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Route</th><th>Month</th><th class="num">Round-trip fares from source</th><th class="num">Matching</th>
+          <th>Dropped because</th><th class="num">One-way fares (any stops)</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      <details><summary class="small">Raw details</summary>
+        <button class="btn btn-small" type="button" data-copy>Copy</button>
+        <pre>${esc(json)}</pre></details>
+      <button class="btn btn-small btn-ghost" type="button" data-close>Close</button>`;
+    $("[data-copy]", panel).addEventListener("click", () => {
+      navigator.clipboard?.writeText(json).then(() => toast("Copied"), () => toast("Copy failed"));
+    });
+    $("[data-close]", panel).addEventListener("click", () => { panel.hidden = true; });
+  } catch (err) {
+    panel.innerHTML = `<p class="error">${esc(err.message)}</p>`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
 // ---------- card actions ----------
 
 $("#watches").addEventListener("click", async (e) => {
@@ -346,6 +404,7 @@ $("#watches").addEventListener("click", async (e) => {
 
   try {
     if (action === "edit") return openForm(watch);
+    if (action === "diagnose") return runDiagnose(card, watch, button);
     if (action === "toggle") {
       await api("PATCH", `/watches/${watch.id}`, { active: !watch.active });
       toast(watch.active ? "Watch paused" : "Watch resumed");
@@ -474,8 +533,10 @@ $("#btn-check").addEventListener("click", async (e) => {
   button.textContent = "Checking…";
   try {
     const result = await api("POST", "/check");
-    const fares = (result.watches ?? []).reduce((n, w) => n + (w.fares ?? 0), 0);
-    let msg = `Checked ${result.watches?.length ?? 0} watch(es): ${fares} matching fares, ${result.alertsSent} alert(s) sent.`;
+    const sum = (key) => (result.watches ?? []).reduce((n, w) => n + (w[key] ?? 0), 0);
+    let msg = `Checked ${result.watches?.length ?? 0} watch(es): ${sum("faresFromSource")} fares from source, `
+      + `${sum("fares")} matching, ${result.alertsSent} alert(s) sent.`;
+    if (sum("fares") === 0) msg += " Use Diagnose on a watch to see why.";
     if (result.errors?.length) msg += ` ${result.errors.length} search error(s): ${result.errors[0]}`;
     toast(msg, 10000);
     await refresh();

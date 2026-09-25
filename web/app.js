@@ -665,6 +665,20 @@ $("#btn-test-email").addEventListener("click", async (e) => {
   }
 });
 
+$("#btn-digest").addEventListener("click", async (e) => {
+  const button = e.currentTarget;
+  button.disabled = true;
+  try {
+    if (DEMO) throw new Error("Demo mode: sign in to send the weekly summary.");
+    const r = await api("POST", "/digest");
+    toast(`Weekly summary sent to ${r.to.join(", ")} (${r.watches} watch${r.watches === 1 ? "" : "es"}).`, 8000);
+  } catch (err) {
+    toast(`Weekly summary failed: ${err.message}`, 10000);
+  } finally {
+    button.disabled = false;
+  }
+});
+
 // ---------- boot ----------
 
 async function refresh() {

@@ -80,3 +80,4 @@ jobs:
         run: |
           supabase functions deploy check-prices --project-ref "$PROJECT_REF" --no-verify-jwt
           supabase functions deploy api --project-ref "$PROJECT_REF" --no-verify-jwt
+          supabase functions deploy weekly-digest --project-ref "$PROJECT_REF" --no-verify-jwt

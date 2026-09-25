@@ -10,24 +10,22 @@
 //   POST   /watches/:id/google-test  one Google search for chosen dates, with a full report (uses 1 search)
 //   POST   /check              run check-prices now
 //   POST   /test-email         send a sample alert (built from a real current fare) to ALERT_EMAIL_TO
+//   POST   /digest             send the weekly summary email now
 
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import {
   addDays,
   buildSearchPlan,
-  comboKey,
   countRejections,
   ticketsToTrips,
   type TpTicket,
-  tripCombos,
   type Watch,
 } from "../check-prices/logic.ts";
 import { fetchTickets } from "../_shared/travelpayouts.ts";
 import { googleSearchReport, serpApiAccount } from "../_shared/serpapi.ts";
 import { sendEmail } from "../_shared/resend.ts";
 import { alertHtml, alertSubject, type PriceAlert } from "../check-prices/email.ts";
-
-const GOOGLE_FRESH_DAYS = 12; // matches route_daily_best
+import { GOOGLE_FRESH_DAYS, googleCoverage, latestFares, toWatch } from "../_shared/queries.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -94,6 +92,7 @@ Deno.serve(async (req) => {
     if (req.method === "GET" && path === "/overview") return json(await overview(db));
     if (req.method === "POST" && path === "/check") return await runCheck();
     if (req.method === "POST" && path === "/test-email") return json(await testEmail(db));
+    if (req.method === "POST" && path === "/digest") return await callInternal("weekly-digest");
 
     if (req.method === "POST" && path === "/watches") {
       const { data, error } = await db.from("watches").insert(pickWatchFields(await req.json()))
@@ -132,63 +131,27 @@ Deno.serve(async (req) => {
 async function overview(db: SupabaseClient) {
   const today = new Date().toISOString().slice(0, 10);
   const since = addDays(today, -HISTORY_DAYS);
-  const [watches, daily, alerts, log, account] = await Promise.all([
+  const [watches, daily, alerts, account] = await Promise.all([
     db.from("watches").select("*").order("created_at"),
     db.from("route_daily_best")
       .select("watch_id, origin, destination, checked_on, price, price_total, price_level, currency, depart_date, return_date, airline, source")
       .gte("checked_on", since)
       .order("checked_on"),
     db.from("alerts").select("*").order("sent_at", { ascending: false }).limit(20),
-    db.from("search_log").select("watch_id, depart_date, return_date")
-      .eq("source", "google").gt("checked_on", addDays(today, -GOOGLE_FRESH_DAYS)),
     serpApiAccount().catch(() => null),
   ]);
-  for (const result of [watches, daily, alerts, log]) if (result.error) throw result.error;
-
-  // How many of each watch's date pairs Google has looked at recently.
-  const googleCoverage: Record<number, { checked: number; total: number }> = {};
-  for (const row of watches.data ?? []) {
-    const watch: Watch = { ...row, drop_pct: Number(row.drop_pct) };
-    const keys = new Set(tripCombos(watch, today).map(comboKey));
-    const checked = new Set(
-      (log.data ?? []).filter((r) => r.watch_id === watch.id)
-        .map((r) => comboKey({ depart: r.depart_date, ret: r.return_date }))
-        .filter((k) => keys.has(k)),
-    );
-    googleCoverage[watch.id] = { checked: checked.size, total: keys.size };
-  }
+  for (const result of [watches, daily, alerts]) if (result.error) throw result.error;
+  const coverage = await googleCoverage(db, (watches.data ?? []).map(toWatch));
 
   return {
     watches: watches.data,
     daily: daily.data,
     alerts: alerts.data,
-    google: { enabled: Boolean(Deno.env.get("SERPAPI_KEY")), account, coverage: googleCoverage, freshDays: GOOGLE_FRESH_DAYS },
+    google: { enabled: Boolean(Deno.env.get("SERPAPI_KEY")), account, coverage, freshDays: GOOGLE_FRESH_DAYS },
   };
 }
 
-/** Latest known fare for each date pair: today's Aviasales fares plus Google fares from the last 12 days. */
-async function latestTrips(db: SupabaseClient, watchId: number) {
-  const today = new Date().toISOString().slice(0, 10);
-  const { data, error } = await db.from("price_snapshots")
-    .select("*")
-    .eq("watch_id", watchId)
-    .gt("checked_on", addDays(today, -GOOGLE_FRESH_DAYS))
-    .order("checked_on", { ascending: false })
-    .limit(2000);
-  if (error) throw error;
-  if (!data?.length) return { checked_on: null, trips: [] };
-
-  const latestTp = data.find((r) => r.source === "travelpayouts")?.checked_on;
-  const seen = new Set<string>();
-  const trips = data.filter((r) => {
-    if (r.source === "travelpayouts" && r.checked_on !== latestTp) return false;
-    const key = `${r.source}|${r.origin}|${r.destination}|${r.depart_date}|${r.return_date}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  }).sort((a, b) => Number(a.price) - Number(b.price)).slice(0, 30);
-  return { checked_on: data[0].checked_on, trips };
-}
+const latestTrips = (db: SupabaseClient, watchId: number) => latestFares(db, watchId, 30);
 
 /**
  * Run the watch's searches live (nothing is saved) and report, per search:
@@ -321,11 +284,14 @@ async function testEmail(db: SupabaseClient) {
   return { ok: true, to: sent.to, id: sent.id };
 }
 
-async function runCheck(): Promise<Response> {
-  const res = await fetch(`${env("SUPABASE_URL")}/functions/v1/check-prices`, {
+const runCheck = () => callInternal("check-prices");
+
+/** Call another of our functions with the cron secret and pass its JSON response through. */
+async function callInternal(fn: "check-prices" | "weekly-digest"): Promise<Response> {
+  const res = await fetch(`${env("SUPABASE_URL")}/functions/v1/${fn}`, {
     method: "POST",
     headers: { "x-cron-secret": env("CRON_SECRET") },
   });
-  const body = await res.json().catch(() => ({ error: `check-prices HTTP ${res.status}` }));
+  const body = await res.json().catch(() => ({ error: `${fn} HTTP ${res.status}` }));
   return json(body, res.status);
 }

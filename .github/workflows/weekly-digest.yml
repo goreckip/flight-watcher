@@ -1,0 +1,34 @@
+name: Weekly summary
+
+on:
+  schedule:
+    # GitHub cron is UTC-only. Run at 16:00 and 17:00 UTC on Sundays and send only on the run
+    # where it's 18:xx in Warsaw, so the email arrives at 18:00 in both summer and winter time.
+    - cron: "0 16 * * 0"
+    - cron: "0 17 * * 0"
+  workflow_dispatch:
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send weekly summary
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          hour=$(TZ=Europe/Warsaw date +%H)
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$hour" != "18" ]; then
+            echo "It's ${hour}:xx in Warsaw; the other scheduled run sends at 18:00."
+            exit 0
+          fi
+          # Logs are public: print only whether it was sent.
+          curl --fail-with-body -sS -X POST \
+            -H "x-cron-secret: $CRON_SECRET" \
+            --max-time 120 \
+            -o result.json \
+            https://uorpnghoagbnwrdyrgre.supabase.co/functions/v1/weekly-digest \
+            || { echo "weekly-digest failed (details in Supabase → Edge Functions → Logs)"; exit 1; }
+          summary=$(jq -r '"Sent: \(.sent) · watches: \(.watches)"' result.json)
+          echo "$summary"
+          echo "### Weekly summary: $summary" >> "$GITHUB_STEP_SUMMARY"
+          rm result.json

@@ -1,8 +1,11 @@
 project_id = "flight-watcher"
 
-# Both functions do their own auth (shared secret / password) instead of requiring a Supabase JWT.
+# All functions do their own auth (shared secret / password) instead of requiring a Supabase JWT.
 [functions.check-prices]
 verify_jwt = false
 
 [functions.api]
+verify_jwt = false
+
+[functions.weekly-digest]
 verify_jwt = false

@@ -30,33 +30,6 @@ jobs:
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
     steps:
       - name: Check secrets are configured
-        id: secrets
-        run: |
-          if [ -z "$SUPABASE_ACCESS_TOKEN" ] || [ -z "$SUPABASE_DB_PASSWORD" ]; then
-            echo "::warning::SUPABASE_ACCESS_TOKEN / SUPABASE_DB_PASSWORD not set; skipping deploy. See README → Setup."
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - uses: actions/checkout@v4
-        if: steps.secrets.outputs.ready == 'true'
-
-      - uses: supabase/setup-cli@v1
-        if: steps.secrets.outputs.ready == 'true'
-        with:
-          version: latest
-
-      - name: Link project
-        if: steps.secrets.outputs.ready == 'true'
-        run: supabase link --project-ref "$PROJECT_REF"
-
-      - name: Apply database migrations
-        if: steps.secrets.outputs.ready == 'true'
-        run: supabase db push
-
-      - name: Sync function secrets
-        if: steps.secrets.outputs.ready == 'true'
         env:
           TRAVELPAYOUTS_TOKEN: ${{ secrets.TRAVELPAYOUTS_TOKEN }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
@@ -64,14 +37,43 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
         run: |
-          args=()
-          for name in TRAVELPAYOUTS_TOKEN RESEND_API_KEY ALERT_EMAIL_TO CRON_SECRET APP_PASSWORD; do
-            if [ -n "${!name}" ]; then args+=("$name=${!name}"); else echo "::warning::$name not set"; fi
+          missing=0
+          for name in SUPABASE_ACCESS_TOKEN SUPABASE_DB_PASSWORD TRAVELPAYOUTS_TOKEN RESEND_API_KEY ALERT_EMAIL_TO CRON_SECRET APP_PASSWORD; do
+            if [ -n "${!name}" ]; then echo "✔ $name"; else echo "::error::Missing repository secret: $name"; missing=1; fi
           done
-          if [ ${#args[@]} -gt 0 ]; then supabase secrets set --project-ref "$PROJECT_REF" "${args[@]}"; fi
+          if [ "$missing" = 1 ]; then
+            echo "Add them under Settings → Secrets and variables → Actions → Repository secrets (exact uppercase names)."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Link project
+        run: supabase link --project-ref "$PROJECT_REF"
+
+      - name: Apply database migrations
+        run: supabase db push
+
+      - name: Sync function secrets
+        env:
+          TRAVELPAYOUTS_TOKEN: ${{ secrets.TRAVELPAYOUTS_TOKEN }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
+        run: |
+          supabase secrets set --project-ref "$PROJECT_REF" \
+            "TRAVELPAYOUTS_TOKEN=$TRAVELPAYOUTS_TOKEN" \
+            "RESEND_API_KEY=$RESEND_API_KEY" \
+            "ALERT_EMAIL_TO=$ALERT_EMAIL_TO" \
+            "CRON_SECRET=$CRON_SECRET" \
+            "APP_PASSWORD=$APP_PASSWORD"
 
       - name: Deploy Edge Functions
-        if: steps.secrets.outputs.ready == 'true'
         run: |
           supabase functions deploy check-prices --project-ref "$PROJECT_REF" --no-verify-jwt
           supabase functions deploy api --project-ref "$PROJECT_REF" --no-verify-jwt

@@ -1,0 +1,72 @@
+name: Test & deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  PROJECT_REF: uorpnghoagbnwrdyrgre
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm test
+
+  deploy:
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+    steps:
+      - name: Check secrets are configured
+        id: secrets
+        run: |
+          if [ -z "$SUPABASE_ACCESS_TOKEN" ] || [ -z "$SUPABASE_DB_PASSWORD" ]; then
+            echo "::warning::SUPABASE_ACCESS_TOKEN / SUPABASE_DB_PASSWORD not set; skipping deploy. See README → Setup."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.secrets.outputs.ready == 'true'
+
+      - uses: supabase/setup-cli@v1
+        if: steps.secrets.outputs.ready == 'true'
+        with:
+          version: latest
+
+      - name: Link project
+        if: steps.secrets.outputs.ready == 'true'
+        run: supabase link --project-ref "$PROJECT_REF"
+
+      - name: Apply database migrations
+        if: steps.secrets.outputs.ready == 'true'
+        run: supabase db push
+
+      - name: Sync function secrets
+        if: steps.secrets.outputs.ready == 'true'
+        env:
+          TRAVELPAYOUTS_TOKEN: ${{ secrets.TRAVELPAYOUTS_TOKEN }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          args=()
+          for name in TRAVELPAYOUTS_TOKEN RESEND_API_KEY ALERT_EMAIL_TO CRON_SECRET; do
+            if [ -n "${!name}" ]; then args+=("$name=${!name}"); else echo "::warning::$name not set"; fi
+          done
+          if [ ${#args[@]} -gt 0 ]; then supabase secrets set --project-ref "$PROJECT_REF" "${args[@]}"; fi
+
+      - name: Deploy Edge Function
+        if: steps.secrets.outputs.ready == 'true'
+        run: supabase functions deploy check-prices --project-ref "$PROJECT_REF" --no-verify-jwt

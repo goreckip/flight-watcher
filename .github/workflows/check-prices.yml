@@ -1,0 +1,25 @@
+name: Check prices
+
+on:
+  schedule:
+    - cron: "0 5 * * *" # 05:00 UTC daily = 07:00 Warsaw (summer) / 06:00 (winter)
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run check-prices
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          curl --fail-with-body -sS -X POST \
+            -H "x-cron-secret: $CRON_SECRET" \
+            --max-time 150 \
+            https://uorpnghoagbnwrdyrgre.supabase.co/functions/v1/check-prices \
+            | tee result.json
+          echo
+          echo "### Price check" >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat result.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

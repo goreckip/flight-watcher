@@ -66,6 +66,8 @@ supabase/
     email.ts                  alert email template
     index.ts                  I/O: Travelpayouts, database, Resend
   functions/api/              HTTP API for the dashboard (password-protected)
+  functions/weekly-digest/    weekly summary email
+  functions/_shared/          API clients (Travelpayouts, SerpApi, Resend), digest, shared queries
   examples/watches.sql        example watches, if you prefer SQL
 web/                          the dashboard (no build step)
 tests/                        unit tests for logic.ts (npm test)
@@ -74,6 +76,7 @@ scripts/serve.mjs             local static server for web/ (npm run dev)
   deploy.yml                  test → type-check → migrate DB → sync secrets → deploy functions
   check-prices.yml            daily trigger (05:00 UTC) + manual "Run workflow"
   pages.yml                   publish web/ to GitHub Pages
+  weekly-digest.yml           Sunday 18:00 Warsaw weekly summary email (+ manual run)
 ```
 
 ## Setup
@@ -115,5 +118,5 @@ npm run dev       # serve web/ at http://localhost:5173 (add ?demo for sample da
 
 1. ~~MVP: tables, check-prices function, email alerts~~
 2. ~~Web dashboard with price charts~~
-3. Weekly trend digest email
+3. ~~Weekly summary email (Sundays 18:00 Warsaw time)~~
 4. Natural-language watch creation (LLM): "Japan in spring for 2+ weeks from Gdansk, Warsaw or Berlin"

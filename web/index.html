@@ -44,7 +44,10 @@
       <section class="panel" id="alerts-panel">
         <div class="panel-head">
           <h2>Recent alerts</h2>
-          <button class="btn btn-small" id="btn-test-email" type="button">Send test email</button>
+          <div class="card-actions">
+            <button class="btn btn-small" id="btn-digest" type="button" title="Normally sent automatically on Sundays at 18:00 (Warsaw time)">Send weekly summary now</button>
+            <button class="btn btn-small" id="btn-test-email" type="button">Send test alert</button>
+          </div>
         </div>
         <div id="alerts"></div>
       </section>

@@ -1,0 +1,151 @@
+// HTTP API for the web dashboard (web/). Protected by one shared password: APP_PASSWORD.
+//
+//   GET    /auth               check the password
+//   GET    /overview           watches + last 60 days of daily cheapest fares + recent alerts
+//   POST   /watches            create a watch
+//   PATCH  /watches/:id        update a watch
+//   DELETE /watches/:id        delete a watch and its history
+//   GET    /watches/:id/trips  cheapest trips from the latest check
+//   POST   /check              run check-prices now
+
+import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "content-type, x-app-password",
+};
+
+const WATCH_FIELDS = [
+  "name", "origins", "destinations", "depart_from", "depart_to", "return_by",
+  "stay_min", "stay_max", "max_transfers", "max_leg_minutes",
+  "adults", "child_ages", "drop_pct", "currency", "active",
+];
+
+const HISTORY_DAYS = 60;
+
+function env(name: string): string {
+  const value = Deno.env.get(name);
+  if (!value) throw new Error(`Missing env var ${name}`);
+  return value;
+}
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...CORS, "Content-Type": "application/json" },
+  });
+}
+
+/** Constant-time comparison so response timing doesn't leak the password. */
+function passwordOk(given: string | null): boolean {
+  const expected = Deno.env.get("APP_PASSWORD");
+  if (!expected || !given) return false;
+  const a = new TextEncoder().encode(given);
+  const b = new TextEncoder().encode(expected);
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
+}
+
+function pickWatchFields(body: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of WATCH_FIELDS) if (key in body) out[key] = body[key];
+  for (const key of ["origins", "destinations"]) {
+    if (Array.isArray(out[key])) {
+      out[key] = (out[key] as unknown[]).map((s) => String(s).trim().toUpperCase()).filter(Boolean);
+    }
+  }
+  if (typeof out.currency === "string") out.currency = out.currency.toUpperCase();
+  return out;
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
+  if (!passwordOk(req.headers.get("x-app-password"))) return json({ error: "Wrong password" }, 401);
+
+  const path = new URL(req.url).pathname.replace(/^.*?\/api(?=\/|$)/, "") || "/";
+  const db = createClient(env("SUPABASE_URL"), env("SUPABASE_SERVICE_ROLE_KEY"), {
+    auth: { persistSession: false },
+  });
+
+  try {
+    if (req.method === "GET" && path === "/auth") return json({ ok: true });
+    if (req.method === "GET" && path === "/overview") return json(await overview(db));
+    if (req.method === "POST" && path === "/check") return await runCheck();
+
+    if (req.method === "POST" && path === "/watches") {
+      const { data, error } = await db.from("watches").insert(pickWatchFields(await req.json()))
+        .select().single();
+      if (error) throw error;
+      return json(data, 201);
+    }
+
+    const match = path.match(/^\/watches\/(\d+)(\/trips)?$/);
+    if (match) {
+      const id = Number(match[1]);
+      if (match[2] && req.method === "GET") return json(await latestTrips(db, id));
+      if (!match[2] && req.method === "PATCH") {
+        const { data, error } = await db.from("watches").update(pickWatchFields(await req.json()))
+          .eq("id", id).select().single();
+        if (error) throw error;
+        return json(data);
+      }
+      if (!match[2] && req.method === "DELETE") {
+        const { error } = await db.from("watches").delete().eq("id", id);
+        if (error) throw error;
+        return json({ ok: true });
+      }
+    }
+
+    return json({ error: "Not found" }, 404);
+  } catch (err) {
+    console.error(err);
+    const message = (err as { message?: string }).message ?? String(err);
+    return json({ error: message }, 400);
+  }
+});
+
+async function overview(db: SupabaseClient) {
+  const since = new Date(Date.now() - HISTORY_DAYS * 86_400_000).toISOString().slice(0, 10);
+  const [watches, daily, alerts] = await Promise.all([
+    db.from("watches").select("*").order("created_at"),
+    db.from("route_daily_min")
+      .select("watch_id, origin, destination, checked_on, price, currency, depart_date, return_date, airline")
+      .gte("checked_on", since)
+      .order("checked_on"),
+    db.from("alerts").select("*").order("sent_at", { ascending: false }).limit(20),
+  ]);
+  for (const result of [watches, daily, alerts]) if (result.error) throw result.error;
+  return { watches: watches.data, daily: daily.data, alerts: alerts.data };
+}
+
+async function latestTrips(db: SupabaseClient, watchId: number) {
+  const { data: latest, error } = await db.from("price_snapshots")
+    .select("checked_on")
+    .eq("watch_id", watchId)
+    .order("checked_on", { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  if (!latest?.length) return { checked_on: null, trips: [] };
+
+  const checkedOn = latest[0].checked_on;
+  const { data: trips, error: tripsError } = await db.from("price_snapshots")
+    .select("*")
+    .eq("watch_id", watchId)
+    .eq("checked_on", checkedOn)
+    .order("price")
+    .limit(30);
+  if (tripsError) throw tripsError;
+  return { checked_on: checkedOn, trips };
+}
+
+async function runCheck(): Promise<Response> {
+  const res = await fetch(`${env("SUPABASE_URL")}/functions/v1/check-prices`, {
+    method: "POST",
+    headers: { "x-cron-secret": env("CRON_SECRET") },
+  });
+  const body = await res.json().catch(() => ({ error: `check-prices HTTP ${res.status}` }));
+  return json(body, res.status);
+}

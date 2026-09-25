@@ -4,12 +4,15 @@
 --   max_leg_minutes : max journey time per direction, including the connection (null = no limit)
 --   adults / child_ages : used for the estimated family total in alerts
 
+-- (The web dashboard does the same thing through a form.)
+--   depart_to = return_by − stay_min, i.e. the latest departure that still gets you back in time
+
 insert into public.watches
-  (name, origins, destinations, depart_from, depart_to, stay_min, stay_max,
+  (name, origins, destinations, depart_from, depart_to, return_by, stay_min, stay_max,
    max_transfers, max_leg_minutes, adults, child_ages, drop_pct)
 values
-  -- Gdansk → Athens, winter break 2027: 5–7 nights, max 1 stop, max 6h30 each way, 2 adults + 3 kids
-  ('Athens winter break', '{GDN}', '{ATH}', '2027-01-29', '2027-02-14', 5, 7,
+  -- Gdansk → Athens, winter break 2027: 5–7 nights, back by 14 Feb, max 1 stop, max 6h30 each way, 2 adults + 3 kids
+  ('Athens winter break', '{GDN}', '{ATH}', '2027-01-29', '2027-02-09', '2027-02-14', 5, 7,
    1, 390, 2, '{3,7,9}', 10);
 
 -- More ideas for later:

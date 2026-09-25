@@ -19,6 +19,7 @@ const spain: Watch = {
   destinations: ["BCN", "AGP"],
   depart_from: "2027-05-10",
   depart_to: "2027-06-20",
+  return_by: null,
   stay_min: 5,
   stay_max: 8,
   max_transfers: 0,
@@ -109,6 +110,21 @@ test("ticketsToTrips enforces max journey time per direction", () => {
   );
   assert.deepEqual(trips.map((t) => t.price).sort(), [800, 900]);
   assert.equal(trips.find((t) => t.price === 900)!.duration_back, 385);
+});
+
+test("ticketsToTrips rejects returns after return_by", () => {
+  const req = { origin: "GDN", destination: "ATH", month: "2027-02" };
+  const athens = { ...spain, depart_from: "2027-01-29", depart_to: "2027-02-09", return_by: "2027-02-14", stay_min: 5, stay_max: 7 };
+  const trips = ticketsToTrips(
+    [
+      ticket("2027-02-07", "2027-02-14", 500), // back on the last day: ok
+      ticket("2027-02-09", "2027-02-15", 400), // back one day late
+    ],
+    req,
+    athens,
+    "2026-09-25",
+  );
+  assert.deepEqual(trips.map((t) => t.return_date), ["2027-02-14"]);
 });
 
 test("payingSeats counts adults and children aged 2+", () => {

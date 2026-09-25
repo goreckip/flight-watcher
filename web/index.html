@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Flight Watcher</title>
+  <meta name="description" content="Daily flight price tracking with email alerts on price drops.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✈️</text></svg>">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js" defer></script>
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">✈️ <span>Flight Watcher</span></div>
+    <div class="topbar-actions" id="topbar-actions" hidden>
+      <button class="btn" id="btn-check" type="button">Check prices now</button>
+      <button class="btn btn-primary" id="btn-new" type="button">+ New watch</button>
+      <button class="btn btn-ghost" id="btn-logout" type="button" title="Sign out">Sign out</button>
+    </div>
+  </header>
+
+  <div class="banner" id="demo-banner" hidden>
+    Demo mode: sample data, changes are disabled. <a href="./">Sign in</a>
+  </div>
+
+  <main class="container">
+    <section id="login" class="login" hidden>
+      <h1>Sign in</h1>
+      <p class="muted">Enter the dashboard password (<code>APP_PASSWORD</code> in GitHub Secrets).</p>
+      <form id="login-form" class="login-form">
+        <input type="password" id="login-password" autocomplete="current-password" placeholder="Password" required>
+        <button class="btn btn-primary" type="submit">Sign in</button>
+      </form>
+      <p class="error" id="login-error" hidden></p>
+      <p class="muted small">Just looking? <a href="?demo">Open the demo</a>.</p>
+    </section>
+
+    <section id="app" hidden>
+      <div id="watches"></div>
+      <section class="panel" id="alerts-panel">
+        <h2>Recent alerts</h2>
+        <div id="alerts"></div>
+      </section>
+    </section>
+  </main>
+
+  <dialog id="watch-dialog">
+    <form id="watch-form" method="dialog">
+      <h2 id="watch-form-title">New watch</h2>
+
+      <label class="field full">Name
+        <input name="name" required placeholder="Athens winter break">
+      </label>
+
+      <label class="field">From
+        <input name="origins" required placeholder="GDN" autocapitalize="characters">
+        <span class="hint">Airport or city codes, comma-separated</span>
+      </label>
+      <label class="field">To
+        <input name="destinations" required placeholder="ATH" autocapitalize="characters">
+        <span class="hint">e.g. ATH or BCN, AGP, MAD</span>
+      </label>
+
+      <label class="field">Leave on or after
+        <input name="depart_from" type="date" required>
+      </label>
+      <label class="field">Back by
+        <input name="return_by" type="date" required>
+      </label>
+
+      <label class="field">Nights (min)
+        <input name="stay_min" type="number" min="1" max="60" required value="5">
+      </label>
+      <label class="field">Nights (max)
+        <input name="stay_max" type="number" min="1" max="60" required value="7">
+      </label>
+
+      <label class="field">Stops each way
+        <select name="max_transfers">
+          <option value="0">Direct only</option>
+          <option value="1" selected>Up to 1 stop</option>
+          <option value="2">Up to 2 stops</option>
+        </select>
+      </label>
+      <label class="field">Max journey time each way (hours)
+        <input name="max_leg_hours" type="number" min="1" max="48" step="0.5" placeholder="No limit" value="6.5">
+      </label>
+
+      <label class="field">Adults
+        <input name="adults" type="number" min="1" max="9" required value="2">
+      </label>
+      <label class="field">Children's ages
+        <input name="child_ages" placeholder="3, 7, 9">
+        <span class="hint">Leave empty if none</span>
+      </label>
+
+      <label class="field">Alert when price drops by (%)
+        <input name="drop_pct" type="number" min="1" max="90" required value="10">
+      </label>
+      <label class="field">Currency
+        <select name="currency">
+          <option>PLN</option>
+          <option>EUR</option>
+          <option>USD</option>
+          <option>GBP</option>
+        </select>
+      </label>
+
+      <p class="error full" id="watch-form-error" hidden></p>
+      <div class="dialog-actions full">
+        <button class="btn btn-ghost" type="button" id="watch-cancel">Cancel</button>
+        <button class="btn btn-primary" type="submit" id="watch-save">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

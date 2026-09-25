@@ -372,12 +372,22 @@ async function runDiagnose(card, watch, button) {
           <td class="num">${s.oneWayOutbound.fares}</td>
         </tr>`).join("");
     const json = JSON.stringify(result, null, 2);
+    const probeRows = (result.probes ?? []).map((p) => `<tr>
+        <td class="wrap">${esc(p.label)}</td>
+        <td class="num">${p.error ? `<span class="error">${esc(p.error)}</span>` : `<b>${p.fares}</b>`}</td>
+        <td>${p.cheapest?.[0] ? `${money(p.cheapest[0].price, watch.currency)} · ${esc(String(p.cheapest[0].departure_at).slice(0, 10))}` : ""}</td>
+      </tr>`).join("");
     panel.innerHTML = `<h3>Diagnosis <span class="muted small">(live, nothing saved)</span></h3>
       <div class="table-wrap"><table>
         <thead><tr><th>Route</th><th>Month</th><th class="num">Round-trip fares from source</th><th class="num">Matching</th>
           <th>Dropped because</th><th class="num">One-way fares (any stops)</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
+      ${probeRows ? `<h3>Data-source checks</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Probe</th><th class="num">Fares</th><th>Cheapest</th></tr></thead>
+        <tbody>${probeRows}</tbody>
+      </table></div>` : ""}
       <details><summary class="small">Raw details</summary>
         <button class="btn btn-small" type="button" data-copy>Copy</button>
         <pre>${esc(json)}</pre></details>

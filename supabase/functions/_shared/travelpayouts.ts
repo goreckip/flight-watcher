@@ -7,9 +7,10 @@ export interface FetchOptions {
   currency: string;
   directOnly: boolean;
   oneWay?: boolean; // default false: round trips
+  market?: string; // data-source market; omitted = API default
 }
 
-/** Cheapest cached fares for one route and departure month. */
+/** Cheapest cached fares for one route and departure month (month "" = any date). */
 export async function fetchTickets(search: SearchRequest, opts: FetchOptions): Promise<TpTicket[]> {
   const token = Deno.env.get("TRAVELPAYOUTS_TOKEN");
   if (!token) throw new Error("Missing env var TRAVELPAYOUTS_TOKEN");
@@ -17,7 +18,6 @@ export async function fetchTickets(search: SearchRequest, opts: FetchOptions): P
   const params = new URLSearchParams({
     origin: search.origin,
     destination: search.destination,
-    departure_at: search.month,
     one_way: String(opts.oneWay ?? false),
     direct: String(opts.directOnly),
     currency: opts.currency.toLowerCase(),
@@ -25,6 +25,8 @@ export async function fetchTickets(search: SearchRequest, opts: FetchOptions): P
     unique: "false",
     limit: "1000",
   });
+  if (search.month) params.set("departure_at", search.month);
+  if (opts.market) params.set("market", opts.market);
   const res = await fetch(`${PRICES_FOR_DATES}?${params}`, { headers: { "X-Access-Token": token } });
   if (!res.ok) throw new Error(`Travelpayouts HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const body = await res.json();

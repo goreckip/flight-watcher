@@ -1,4 +1,4 @@
-import { demoApi } from "./demo.js";
+import { demoApi } from "./demo.js?v=__VERSION__";
 
 const API_URL = "https://uorpnghoagbnwrdyrgre.supabase.co/functions/v1/api";
 const DEMO = new URLSearchParams(location.search).has("demo");

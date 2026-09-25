@@ -649,6 +649,22 @@ $("#btn-check").addEventListener("click", async (e) => {
   }
 });
 
+// ---------- test email ----------
+
+$("#btn-test-email").addEventListener("click", async (e) => {
+  const button = e.currentTarget;
+  button.disabled = true;
+  try {
+    if (DEMO) throw new Error("Demo mode: sign in to send a test email.");
+    const r = await api("POST", "/test-email");
+    toast(`Test email sent to ${r.to.join(", ")}. Check your inbox (and spam).`, 8000);
+  } catch (err) {
+    toast(`Test email failed: ${err.message}`, 10000);
+  } finally {
+    button.disabled = false;
+  }
+});
+
 // ---------- boot ----------
 
 async function refresh() {

@@ -7,9 +7,12 @@ import {
   countRejections,
   evaluateRoute,
   median,
+  googlePassengers,
   monthsBetween,
   payingSeats,
+  pickCombos,
   ticketsToTrips,
+  tripCombos,
 } from "../supabase/functions/check-prices/logic.ts";
 import type { TpTicket, Trip, Watch } from "../supabase/functions/check-prices/logic.ts";
 
@@ -151,6 +154,48 @@ test("countRejections explains why fares were dropped", () => {
     "stay-length": 1,
     "no-return-flight": 1,
   });
+});
+
+const athensWatch: Watch = {
+  ...spain, origins: ["GDN"], destinations: ["ATH"],
+  depart_from: "2027-01-29", depart_to: "2027-02-09", return_by: "2027-02-14",
+  stay_min: 5, stay_max: 7, max_transfers: 1, max_leg_minutes: 390, adults: 2, child_ages: [3, 7, 9],
+};
+
+test("tripCombos lists every date pair that fits, respecting back-by", () => {
+  const combos = tripCombos(athensWatch, "2026-09-25");
+  assert.ok(combos.every((c) => c.depart >= "2027-01-29" && c.depart <= "2027-02-09"));
+  assert.ok(combos.every((c) => c.ret <= "2027-02-14"));
+  assert.deepEqual(combos[0], { depart: "2027-01-29", ret: "2027-02-03" });
+  assert.deepEqual(combos.at(-1), { depart: "2027-02-09", ret: "2027-02-14" });
+  // 29 Jan–7 Feb: 3 stays each (10 days × 3) + 8 Feb: 5–6 nights + 9 Feb: 5 nights
+  assert.equal(combos.length, 33);
+});
+
+test("pickCombos: cheapest first, then never-checked, then stalest; skips today's", () => {
+  const combos = tripCombos(athensWatch, "2026-09-25");
+  const key = (d: string, r: string) => `${d}|${r}`;
+  const last = new Map<string, string>([
+    [key("2027-01-29", "2027-02-03"), "2026-09-20"],
+    [key("2027-02-01", "2027-02-07"), "2026-09-24"],
+    [key("2027-02-02", "2027-02-08"), "2026-09-25"], // already done today
+  ]);
+  // everything checked except 2 pairs → never-checked ones come before stale ones
+  const picked = pickCombos(combos, last, key("2027-02-01", "2027-02-07"), "2026-09-25", 3);
+  assert.equal(picked.length, 3);
+  assert.deepEqual(picked[0], { depart: "2027-02-01", ret: "2027-02-07" });
+  assert.ok(picked.slice(1).every((c) => !last.has(`${c.depart}|${c.ret}`)));
+
+  const allChecked = new Map(combos.map((c) => [`${c.depart}|${c.ret}`, "2026-09-24"]));
+  allChecked.set(key("2027-01-30", "2027-02-04"), "2026-09-10");
+  allChecked.set(key("2027-02-02", "2027-02-08"), "2026-09-25");
+  const stale = pickCombos(combos, allChecked, key("2027-02-02", "2027-02-08"), "2026-09-25", 2);
+  assert.deepEqual(stale[0], { depart: "2027-01-30", ret: "2027-02-04" }); // oldest first; cheapest skipped (done today)
+});
+
+test("googlePassengers buckets ages the way Google Flights does", () => {
+  assert.deepEqual(googlePassengers(athensWatch), { adults: 2, children: 3, infants_on_lap: 0 });
+  assert.deepEqual(googlePassengers({ ...athensWatch, child_ages: [1, 5, 13] }), { adults: 3, children: 1, infants_on_lap: 1 });
 });
 
 test("payingSeats counts adults and children aged 2+", () => {

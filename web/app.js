@@ -159,15 +159,34 @@ function statTiles(watch, s) {
       <span class="stat-value ${cls}">${arrow} ${down ? "−" : "+"}${Math.abs(s.change).toFixed(1)}%</span>
       <span class="stat-sub">median ${money(s.baseline, cur)} · ${s.historyDays} day${s.historyDays === 1 ? "" : "s"} of history</span></div>`;
   }
+  const total = groupTotal(s.best, watch);
+  const level = s.best.price_level ? ` · Google: prices <b>${esc(s.best.price_level)}</b>` : "";
   return `<div class="stats">
     <div class="stat"><span class="stat-label">Cheapest now</span>
       <span class="stat-value">${money(price, cur)}</span>
-      <span class="stat-sub">per person${seats > 1 ? ` · ~${money(price * seats, cur)} for ${seats}` : ""}</span></div>
+      <span class="stat-sub">per person${seats > 1 ? ` · ${total.exact ? "" : "~"}${money(total.amount, cur)} for ${seats}` : ""}${level}</span></div>
     ${changeTile}
     <div class="stat"><span class="stat-label">Best dates</span>
       <span class="stat-value">${fmtShort(s.best.depart_date)} – ${fmtShort(s.best.return_date)}</span>
-      <span class="stat-sub">${esc(s.best.origin)} → ${esc(s.best.destination)} · ${nightsBetween(s.best.depart_date, s.best.return_date)} nights${s.best.airline ? ` · ${esc(s.best.airline)}` : ""}</span></div>
+      <span class="stat-sub">${esc(s.best.origin)} → ${esc(s.best.destination)} · ${nightsBetween(s.best.depart_date, s.best.return_date)} nights${s.best.airline ? ` · ${esc(s.best.airline)}` : ""} · ${sourceLabel(s.best.source)}</span></div>
   </div>`;
+}
+
+const sourceLabel = (source) => (source === "google" ? "Google Flights" : "Aviasales cache");
+
+/** Google prices the whole group exactly; Aviasales is per adult, so its total is an estimate. */
+function groupTotal(fare, watch) {
+  if (fare.price_total) return { amount: Number(fare.price_total), exact: true };
+  return { amount: Number(fare.price) * payingSeats(watch), exact: false };
+}
+
+function coverageLine(watch) {
+  const g = data.google;
+  if (!g?.enabled) return "";
+  const c = g.coverage?.[watch.id];
+  if (!c?.total) return "";
+  return `<p class="coverage">Google Flights: ${c.checked} of ${c.total} date options checked in the last ${g.freshDays} days
+    <span class="muted">(a few per day, cheapest re-checked daily)</span></p>`;
 }
 
 function watchCard(watch) {
@@ -187,7 +206,7 @@ function watchCard(watch) {
     ? `${statTiles(watch, s)}
        <p class="chart-title">Cheapest fare per person, by day of check${s.lastDay ? ` · last checked ${fmtDate(s.lastDay)}` : ""}</p>
        <div class="chart-wrap"><canvas aria-label="Price history chart for ${esc(watch.name)}" role="img"></canvas></div>
-       <details class="trips"><summary>Cheapest trips from the last check</summary><div class="trips-body"><p class="muted small">Loading…</p></div></details>`
+       <details class="trips"><summary>Latest known fares</summary><div class="trips-body"><p class="muted small">Loading…</p></div></details>`
     : `<div class="empty">No fares recorded yet. They appear after the next daily check, or click <b>Check prices now</b>.</div>`;
 
   return `<article class="card${watch.active ? "" : " inactive"}" data-id="${watch.id}">
@@ -195,6 +214,7 @@ function watchCard(watch) {
       <div>
         <h2>${esc(watch.name)} ${watch.active ? "" : `<span class="pill">Paused</span>`}</h2>
         <p class="criteria">${criteria}</p>
+        ${coverageLine(watch)}
       </div>
       <div class="card-actions">
         <button class="btn btn-small" data-action="diagnose" type="button" title="Run the searches live and show why fares are filtered out">Diagnose</button>
@@ -305,32 +325,47 @@ function render() {
     }
   }
   renderAlerts();
+
+  const quota = $("#quota");
+  const account = data.google?.account;
+  quota.hidden = !account || account.searchesLeft == null;
+  if (!quota.hidden) {
+    quota.textContent = `Google Flights searches left this month: ${account.searchesLeft}`
+      + (account.usedThisMonth != null ? ` (used ${account.usedThisMonth})` : "");
+  }
 }
 
 async function loadTrips(card, watch) {
   const body = $(".trips-body", card);
   try {
-    const { checked_on, trips } = await api("GET", `/watches/${watch.id}/trips`);
+    const { trips } = await api("GET", `/watches/${watch.id}/trips`);
     if (!trips.length) {
-      body.innerHTML = `<p class="muted small">No matching fares in the last check.</p>`;
+      body.innerHTML = `<p class="muted small">No matching fares yet.</p>`;
       return;
     }
     const seats = payingSeats(watch);
-    body.innerHTML = `<p class="muted small">From the check on ${fmtDate(checked_on)}. Prices are cached, so confirm on the airline site.</p>
+    body.innerHTML = `<p class="muted small">Latest price for each date option: Aviasales from the last check, Google Flights from the last ${data.google?.freshDays ?? 12} days.
+        Totals marked ~ are estimates (per-adult fare × seats). Confirm on the airline site before booking.</p>
       <div class="table-wrap"><table>
         <thead><tr><th>Route</th><th>Dates</th><th class="num">Nights</th><th>Airline</th><th>Stops</th>
-          <th>Journey (out / back)</th><th class="num">Per person</th>${seats > 1 ? `<th class="num">~ ${seats} seats</th>` : ""}<th></th></tr></thead>
-        <tbody>${trips.map((t) => `<tr>
+          <th>Journey out</th><th class="num">Per person</th>${seats > 1 ? `<th class="num">${seats} seats</th>` : ""}
+          <th>Source</th><th>Checked</th><th></th></tr></thead>
+        <tbody>${trips.map((t) => {
+          const total = groupTotal(t, watch);
+          return `<tr>
           <td>${esc(t.origin)} → ${esc(t.destination)}</td>
           <td>${fmtShort(t.depart_date)} – ${fmtShort(t.return_date)}</td>
           <td class="num">${nightsBetween(t.depart_date, t.return_date)}</td>
           <td>${esc(t.airline ?? "")}</td>
           <td>${t.transfers ? `≤ ${t.transfers}` : "Direct"}</td>
-          <td>${hours(t.duration_to)} / ${hours(t.duration_back)}</td>
+          <td>${hours(t.duration_to)}</td>
           <td class="num"><b>${money(t.price, t.currency)}</b></td>
-          ${seats > 1 ? `<td class="num">${money(t.price * seats, t.currency)}</td>` : ""}
+          ${seats > 1 ? `<td class="num">${total.exact ? "" : "~"}${money(total.amount, t.currency)}</td>` : ""}
+          <td>${sourceLabel(t.source)}${t.price_level ? ` <span class="muted">(${esc(t.price_level)})</span>` : ""}</td>
+          <td>${fmtShort(t.checked_on)}</td>
           <td>${t.link ? `<a href="${esc(t.link)}" target="_blank" rel="noopener">View</a>` : ""}</td>
-        </tr>`).join("")}</tbody>
+        </tr>`;
+        }).join("")}</tbody>
       </table></div>`;
   } catch (err) {
     body.innerHTML = `<p class="error">${esc(err.message)}</p>`;
@@ -544,8 +579,10 @@ $("#btn-check").addEventListener("click", async (e) => {
   try {
     const result = await api("POST", "/check");
     const sum = (key) => (result.watches ?? []).reduce((n, w) => n + (w[key] ?? 0), 0);
-    let msg = `Checked ${result.watches?.length ?? 0} watch(es): ${sum("faresFromSource")} fares from source, `
-      + `${sum("fares")} matching, ${result.alertsSent} alert(s) sent.`;
+    const googleSearches = (result.watches ?? []).reduce((n, w) => n + (w.google?.searches ?? 0), 0);
+    let msg = `Checked ${result.watches?.length ?? 0} watch(es): ${sum("fares")} matching fares `
+      + `(${googleSearches} Google search${googleSearches === 1 ? "" : "es"}), ${result.alertsSent} alert(s) sent.`;
+    if (googleSearches === 0) msg += " Today's Google searches are used up; more tomorrow.";
     if (sum("fares") === 0) msg += " Use Diagnose on a watch to see why.";
     if (result.errors?.length) msg += ` ${result.errors.length} search error(s): ${result.errors[0]}`;
     toast(msg, 10000);

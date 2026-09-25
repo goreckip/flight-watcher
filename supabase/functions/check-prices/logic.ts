@@ -170,6 +170,75 @@ export function ticketsToTrips(
   return trips;
 }
 
+// ---------- exact-date searches (Google Flights via SerpApi) ----------
+
+export interface DateCombo {
+  depart: string;
+  ret: string;
+}
+
+export const comboKey = (c: DateCombo) => `${c.depart}|${c.ret}`;
+
+/** Every departure/return pair that fits the watch: window, nights, back-by date. */
+export function tripCombos(watch: Watch, today: string): DateCombo[] {
+  const combos: DateCombo[] = [];
+  const first = watch.depart_from > today ? watch.depart_from : today;
+  for (let depart = first; depart <= watch.depart_to; depart = addDays(depart, 1)) {
+    for (let nights = watch.stay_min; nights <= watch.stay_max; nights++) {
+      const ret = addDays(depart, nights);
+      if (watch.return_by && ret > watch.return_by) continue;
+      combos.push({ depart, ret });
+    }
+  }
+  return combos;
+}
+
+/**
+ * Choose which date pairs to search today, given a small daily budget:
+ * 1. re-check the cheapest known pair (tracks the best option's price day to day),
+ * 2. then pairs never searched, spread across the window rather than in date order,
+ * 3. then the pairs searched longest ago.
+ * Pairs already searched today are skipped, so repeated runs don't burn quota.
+ */
+export function pickCombos(
+  combos: DateCombo[],
+  lastChecked: Map<string, string>,
+  cheapestKey: string | null,
+  today: string,
+  n: number,
+): DateCombo[] {
+  const due = combos.filter((c) => lastChecked.get(comboKey(c)) !== today);
+  const picked: DateCombo[] = [];
+  const cheapest = cheapestKey ? due.find((c) => comboKey(c) === cheapestKey) : undefined;
+  if (cheapest) picked.push(cheapest);
+
+  const spread = (i: number) => (i * 0.6180339887) % 1; // golden-ratio stride
+  const never = due
+    .map((c, i) => ({ c, order: spread(i) }))
+    .filter(({ c }) => !lastChecked.has(comboKey(c)))
+    .sort((a, b) => a.order - b.order)
+    .map(({ c }) => c);
+  const stale = due
+    .filter((c) => lastChecked.has(comboKey(c)))
+    .sort((a, b) => lastChecked.get(comboKey(a))!.localeCompare(lastChecked.get(comboKey(b))!));
+
+  for (const c of [...never, ...stale]) {
+    if (picked.length >= n) break;
+    if (!picked.includes(c)) picked.push(c);
+  }
+  return picked.slice(0, n);
+}
+
+/** Google Flights passenger buckets: adults 12+, children 2–11, lap infants under 2. */
+export function googlePassengers(watch: Watch) {
+  const ages = watch.child_ages ?? [];
+  return {
+    adults: watch.adults + ages.filter((a) => a >= 12).length,
+    children: ages.filter((a) => a >= 2 && a < 12).length,
+    infants_on_lap: ages.filter((a) => a < 2).length,
+  };
+}
+
 /**
  * Fares are quoted per adult. Children aged 2+ need their own seat and low-cost airlines
  * charge them the adult fare, so they count as full seats. Infants (<2) fly on a lap for a

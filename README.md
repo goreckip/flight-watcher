@@ -19,7 +19,7 @@ A personal agent that checks flight prices every day, tracks the trend, and emai
 | Backend | Supabase Edge Functions (Deno / TypeScript) |
 | Dashboard | Static HTML/JS + Chart.js on GitHub Pages |
 | Daily scheduler | GitHub Actions cron |
-| Flight prices | Travelpayouts Data API |
+| Flight prices | Travelpayouts Data API (cached, broad) + Google Flights via SerpApi (live, exact dates, 100 free searches/month) |
 | Email | Resend |
 
 ## Architecture
@@ -42,10 +42,15 @@ Edge Function "check-prices"  ◄───  Edge Function "api"
 
 All tables have row-level security on with no public policies: only the Edge Functions (service role) can read or write data.
 
+## Two price sources
+
+- **Travelpayouts (Aviasales cache):** free and broad, but it only knows dates people searched recently, so trips months ahead often have no data yet. Fares are per adult.
+- **Google Flights via SerpApi:** live prices for exact date pairs, priced for the whole group, with Google's low/typical/high verdict. The free plan allows 100 searches a month, so the job makes **3 searches a day** (`SERPAPI_DAILY_SEARCHES`): it re-checks the cheapest known date pair, then works through the others, least recently checked first. Every search is recorded in `search_log`, and a Google price counts as current for 12 days.
+
 ## How alerts work
 
 - Every day the function stores the cheapest fare for every date combination that matches a watch.
-- For each route (e.g. GDN→ATH), it takes **today's cheapest fare** and compares it to the **median of the route's daily cheapest fare over the last 14 days**.
+- For each route (e.g. GDN→ATH), it takes **today's best known fare** (view `route_daily_best`) and compares it to the **median of the route's daily best over the last 14 days**.
 - If today's fare is at least `drop_pct` below that median, you get an email.
 - Alerts start after **3 days of history**, because there's no baseline before that.
 - A route that already alerted in the last 7 days only alerts again if the price drops further.
@@ -85,6 +90,7 @@ scripts/serve.mjs             local static server for web/ (npm run dev)
    | `ALERT_EMAIL_TO` | Your email address (the one you signed up to Resend with) |
    | `CRON_SECRET` | Any long random string |
    | `APP_PASSWORD` | The password you'll type to open the dashboard |
+   | `SERPAPI_KEY` | serpapi.com → Dashboard → API key (free plan: 100 searches/month) |
 
 3. **Deploy the backend**: Actions → *Test & deploy* → *Run workflow*.
 4. **Turn on the website**: Settings → Pages → Source: **GitHub Actions**, then Actions → *Website* → *Run workflow*.

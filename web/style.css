@@ -123,6 +123,8 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
 .card-head { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
 .card-head h2 { font-size: 19px; }
 .criteria { margin: 6px 0 0; color: var(--text-2); font-size: 14px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.coverage { margin: 6px 0 0; font-size: 13px; color: var(--text-2); }
+.quota { margin: 0 0 12px; }
 .card-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .pill {
   font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px;

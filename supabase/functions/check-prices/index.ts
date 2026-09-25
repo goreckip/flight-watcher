@@ -5,20 +5,27 @@ import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import {
   addDays,
   buildSearchPlan,
-  cheapestPerRoute,
   cheapestPerTrip,
+  comboKey,
   countRejections,
   evaluateRoute,
+  pickCombos,
   type TpTicket,
   type Trip,
   ticketsToTrips,
+  tripCombos,
   type Watch,
 } from "./logic.ts";
-import { alertHtml, alertSubject, type PriceAlert } from "./email.ts";
+import { type AlertTrip, alertHtml, alertSubject, type PriceAlert } from "./email.ts";
 import { fetchTickets } from "../_shared/travelpayouts.ts";
+import { searchGoogleFlights } from "../_shared/serpapi.ts";
 
 const HISTORY_DAYS = 14;
 const ALERT_COOLDOWN_DAYS = 7;
+const GOOGLE_FRESH_DAYS = 12; // matches route_daily_best
+// ~100 free SerpApi searches/month → 3 per day across all watches
+const GOOGLE_DAILY_SEARCHES = Number(Deno.env.get("SERPAPI_DAILY_SEARCHES") ?? 3);
+const SNAPSHOT_KEY = "watch_id,checked_on,source,origin,destination,depart_date,return_date";
 
 function env(name: string): string {
   const value = Deno.env.get(name);
@@ -57,7 +64,19 @@ async function run() {
   const routes: Record<string, unknown>[] = [];
   const errors: string[] = [];
 
-  for (const row of watches ?? []) {
+  // Google searches are shared across watches; searches already made today count against the budget.
+  let googleLeft = 0;
+  if (Deno.env.get("SERPAPI_KEY")) {
+    const { count, error: countError } = await db.from("search_log")
+      .select("id", { count: "exact", head: true })
+      .eq("source", "google")
+      .eq("checked_on", today);
+    if (countError) throw countError;
+    googleLeft = Math.max(0, GOOGLE_DAILY_SEARCHES - (count ?? 0));
+  }
+
+  const list = watches ?? [];
+  for (const [i, row] of list.entries()) {
     const watch: Watch = { ...row, drop_pct: Number(row.drop_pct) };
     const plan = buildSearchPlan(watch, today);
 
@@ -76,16 +95,43 @@ async function run() {
       }
     }
     trips = cheapestPerTrip(trips);
-    await saveSnapshots(db, watch, trips, today);
+    await saveTravelpayouts(db, watch, trips, today);
+
+    const googleBudget = Math.min(googleLeft, Math.ceil(googleLeft / (list.length - i)));
+    const google = await googleSearches(db, watch, today, googleBudget);
+    googleLeft -= google.searches;
+    errors.push(...google.errors);
+
     checked.push({
       watch: watch.name,
       searches: plan.length,
       faresFromSource: allTickets.length,
-      fares: trips.length,
+      fares: trips.length + google.fares,
       rejected: countRejections(allTickets, watch, today),
+      google: { searches: google.searches, fares: google.fares },
     });
 
-    for (const best of cheapestPerRoute(trips)) {
+    // Evaluate each route's best known fare today (both sources) against its recent history.
+    const { data: todays, error: bestError } = await db.from("route_daily_best")
+      .select("*").eq("watch_id", watch.id).eq("checked_on", today);
+    if (bestError) throw bestError;
+
+    for (const row of todays ?? []) {
+      const best: AlertTrip = {
+        origin: row.origin,
+        destination: row.destination,
+        depart_date: row.depart_date,
+        return_date: row.return_date,
+        price: Number(row.price),
+        price_total: row.price_total == null ? null : Number(row.price_total),
+        price_level: row.price_level,
+        source: row.source,
+        airline: row.airline,
+        transfers: row.transfers,
+        duration_to: row.duration_to,
+        duration_back: row.duration_back,
+        link: row.link,
+      };
       const history = await routeHistory(db, watch.id, best, today);
       const recentAlerts = await recentAlertPrices(db, watch.id, best);
       const result = evaluateRoute(best.price, history, watch.drop_pct, recentAlerts);
@@ -94,6 +140,7 @@ async function run() {
         watch: watch.name,
         route: `${best.origin}-${best.destination}`,
         price: best.price,
+        source: best.source,
         dates: `${best.depart_date}..${best.return_date}`,
         historyDays: history.length,
         ...result,
@@ -127,19 +174,77 @@ async function run() {
 }
 
 
-async function saveSnapshots(db: SupabaseClient, watch: Watch, trips: Trip[], today: string) {
+async function saveTravelpayouts(db: SupabaseClient, watch: Watch, trips: Trip[], today: string) {
   if (trips.length === 0) return;
   const { error } = await db.from("price_snapshots").upsert(
-    trips.map((t) => ({ ...t, watch_id: watch.id, checked_on: today, currency: watch.currency })),
-    { onConflict: "watch_id,checked_on,origin,destination,depart_date,return_date" },
+    trips.map((t) => ({
+      ...t, watch_id: watch.id, checked_on: today, currency: watch.currency, source: "travelpayouts",
+    })),
+    { onConflict: SNAPSHOT_KEY },
   );
   if (error) throw error;
 }
 
-/** Daily cheapest fares for this route over the previous HISTORY_DAYS days (today excluded). */
+/**
+ * Search up to `budget` exact date pairs on Google Flights, chosen by pickCombos, and store the
+ * results. Every search is logged (even empty or failed ones) to drive the rotation and quota.
+ */
+async function googleSearches(db: SupabaseClient, watch: Watch, today: string, budget: number) {
+  const out = { searches: 0, fares: 0, errors: [] as string[] };
+  const combos = tripCombos(watch, today);
+  if (budget <= 0 || combos.length === 0) return out;
+
+  const { data: log, error: logError } = await db.from("search_log")
+    .select("depart_date, return_date, checked_on")
+    .eq("watch_id", watch.id).eq("source", "google")
+    .gte("checked_on", addDays(today, -90));
+  if (logError) throw logError;
+  const lastChecked = new Map<string, string>();
+  for (const r of log ?? []) {
+    const key = comboKey({ depart: r.depart_date, ret: r.return_date });
+    if ((lastChecked.get(key) ?? "") < r.checked_on) lastChecked.set(key, r.checked_on);
+  }
+
+  const { data: cheapest, error: cheapestError } = await db.from("price_snapshots")
+    .select("depart_date, return_date")
+    .eq("watch_id", watch.id).eq("source", "google")
+    .gt("checked_on", addDays(today, -GOOGLE_FRESH_DAYS))
+    .order("price").limit(1);
+  if (cheapestError) throw cheapestError;
+  const cheapestKey = cheapest?.[0] ? comboKey({ depart: cheapest[0].depart_date, ret: cheapest[0].return_date }) : null;
+
+  for (const combo of pickCombos(combos, lastChecked, cheapestKey, today, budget)) {
+    out.searches++;
+    let results = 0;
+    let errorText: string | null = null;
+    try {
+      const fares = await searchGoogleFlights(watch, combo);
+      results = fares.length;
+      out.fares += fares.length;
+      if (fares.length) {
+        const { error } = await db.from("price_snapshots").upsert(
+          fares.map((f) => ({ ...f, watch_id: watch.id, checked_on: today, currency: watch.currency, source: "google" })),
+          { onConflict: SNAPSHOT_KEY },
+        );
+        if (error) throw error;
+      }
+    } catch (err) {
+      errorText = String((err as { message?: string }).message ?? err);
+      out.errors.push(`${watch.name} Google ${combo.depart}..${combo.ret}: ${errorText}`);
+    }
+    const { error } = await db.from("search_log").insert({
+      watch_id: watch.id, source: "google", checked_on: today,
+      depart_date: combo.depart, return_date: combo.ret, results, error: errorText,
+    });
+    if (error) throw error;
+  }
+  return out;
+}
+
+/** Best known fare for this route on each of the previous HISTORY_DAYS days (today excluded). */
 async function routeHistory(db: SupabaseClient, watchId: number, trip: Trip, today: string) {
   const { data, error } = await db
-    .from("route_daily_min")
+    .from("route_daily_best")
     .select("price")
     .eq("watch_id", watchId)
     .eq("origin", trip.origin)

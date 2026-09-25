@@ -36,9 +36,10 @@ jobs:
           ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
+          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
         run: |
           missing=0
-          for name in SUPABASE_ACCESS_TOKEN SUPABASE_DB_PASSWORD TRAVELPAYOUTS_TOKEN RESEND_API_KEY ALERT_EMAIL_TO CRON_SECRET APP_PASSWORD; do
+          for name in SUPABASE_ACCESS_TOKEN SUPABASE_DB_PASSWORD TRAVELPAYOUTS_TOKEN RESEND_API_KEY ALERT_EMAIL_TO CRON_SECRET APP_PASSWORD SERPAPI_KEY; do
             if [ -n "${!name}" ]; then echo "✔ $name"; else echo "::error::Missing repository secret: $name"; missing=1; fi
           done
           if [ "$missing" = 1 ]; then
@@ -65,13 +66,15 @@ jobs:
           ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
+          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
         run: |
           supabase secrets set --project-ref "$PROJECT_REF" \
             "TRAVELPAYOUTS_TOKEN=$TRAVELPAYOUTS_TOKEN" \
             "RESEND_API_KEY=$RESEND_API_KEY" \
             "ALERT_EMAIL_TO=$ALERT_EMAIL_TO" \
             "CRON_SECRET=$CRON_SECRET" \
-            "APP_PASSWORD=$APP_PASSWORD"
+            "APP_PASSWORD=$APP_PASSWORD" \
+            "SERPAPI_KEY=$SERPAPI_KEY"
 
       - name: Deploy Edge Functions
         run: |

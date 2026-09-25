@@ -26,7 +26,7 @@ const watches = [
   },
 ];
 
-function series(watchId, origin, destination, base, seed, days = 24) {
+function series(watchId, origin, destination, base, seed, days = 24, google = false) {
   const rand = rng(seed);
   const rows = [];
   let price = base;
@@ -36,6 +36,9 @@ function series(watchId, origin, destination, base, seed, days = 24) {
     rows.push({
       watch_id: watchId, origin, destination, checked_on: isoDaysAgo(d),
       price: Math.round(price), currency: "PLN",
+      price_total: google ? Math.round(price) * 5 : null,
+      price_level: google ? (d === 0 ? "low" : "typical") : null,
+      source: google ? "google" : "travelpayouts",
       depart_date: "2027-02-01", return_date: "2027-02-07", airline: "LO",
     });
   }
@@ -43,7 +46,7 @@ function series(watchId, origin, destination, base, seed, days = 24) {
 }
 
 const daily = [
-  ...series(1, "GDN", "ATH", 980, 7),
+  ...series(1, "GDN", "ATH", 980, 7, 24, true),
   ...series(2, "GDN", "BCN", 520, 11),
   ...series(2, "GDN", "AGP", 610, 23),
   ...series(2, "GDN", "MAD", 700, 5, 12),
@@ -70,8 +73,12 @@ function trips(watchId) {
     const nights = 5 + Math.floor(rand() * 3);
     const ret = new Date(depart.getTime() + nights * 86_400_000);
     const stops = watchId === 1 ? (rand() < 0.3 ? 0 : 1) : 0;
+    const google = watchId === 1;
     list.push({
       origin, destination,
+      source: google ? "google" : "travelpayouts",
+      checked_on: isoDaysAgo(google ? i % 5 : 0),
+      price_level: google ? "typical" : null,
       depart_date: depart.toISOString().slice(0, 10),
       return_date: ret.toISOString().slice(0, 10),
       price: Math.round((watchId === 1 ? 850 : 480) + rand() * 300),
@@ -87,7 +94,12 @@ function trips(watchId) {
 }
 
 export async function demoApi(method, path) {
-  if (method === "GET" && path === "/overview") return { watches, daily, alerts };
+  if (method === "GET" && path === "/overview") {
+    return {
+      watches, daily, alerts,
+      google: { enabled: true, freshDays: 12, account: { searchesLeft: 64, usedThisMonth: 36 }, coverage: { 1: { checked: 27, total: 33 } } },
+    };
+  }
   const match = path.match(/^\/watches\/(\d+)\/trips$/);
   if (method === "GET" && match) return { checked_on: isoDaysAgo(0), trips: trips(Number(match[1])) };
   throw new Error("Demo mode: changes are disabled. Sign in to manage your own watches.");

@@ -423,6 +423,24 @@ async function runDiagnose(card, watch, button) {
         <thead><tr><th>Probe</th><th class="num">Fares</th><th>Cheapest</th></tr></thead>
         <tbody>${probeRows}</tbody>
       </table></div>` : ""}
+      <h3>Google Flights searches so far</h3>
+      ${result.googleLog?.length ? `<div class="table-wrap"><table>
+        <thead><tr><th>Searched on</th><th>Dates</th><th class="num">Fares kept</th><th>Error</th></tr></thead>
+        <tbody>${result.googleLog.map((g) => `<tr>
+          <td>${fmtShort(g.checked_on)}</td>
+          <td>${fmtShort(g.depart_date)} – ${fmtShort(g.return_date)}</td>
+          <td class="num">${g.results}</td>
+          <td class="wrap">${g.error ? `<span class="error">${esc(g.error)}</span>` : ""}</td>
+        </tr>`).join("")}</tbody></table></div>`
+        : `<p class="muted small">None yet. They run with each price check (3 per day).</p>`}
+      <h3>Test a Google search</h3>
+      <form class="google-test">
+        <label class="field">Depart <input type="date" name="depart" required value="${esc(watch.depart_from)}"></label>
+        <label class="field">Return <input type="date" name="ret" required value="${esc(addDays(watch.depart_from, watch.stay_min))}"></label>
+        <label class="check"><input type="checkbox" name="filters" checked> Apply the watch's stop and journey-time limits</label>
+        <button class="btn btn-small btn-primary" type="submit">Search (uses 1 of your searches)</button>
+      </form>
+      <div class="google-test-result"></div>
       <details><summary class="small">Raw details</summary>
         <button class="btn btn-small" type="button" data-copy>Copy</button>
         <pre>${esc(json)}</pre></details>
@@ -431,8 +449,44 @@ async function runDiagnose(card, watch, button) {
       navigator.clipboard?.writeText(json).then(() => toast("Copied"), () => toast("Copy failed"));
     });
     $("[data-close]", panel).addEventListener("click", () => { panel.hidden = true; });
+    $(".google-test", panel).addEventListener("submit", (e) => {
+      e.preventDefault();
+      runGoogleTest(e.currentTarget, $(".google-test-result", panel), watch);
+    });
   } catch (err) {
     panel.innerHTML = `<p class="error">${esc(err.message)}</p>`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function runGoogleTest(form, out, watch) {
+  const f = form.elements;
+  const button = $("button", form);
+  button.disabled = true;
+  out.innerHTML = `<p class="muted small">Searching Google Flights…</p>`;
+  try {
+    const r = await api("POST", `/watches/${watch.id}/google-test`, {
+      depart: f.depart.value, ret: f.ret.value, filters: f.filters.checked,
+    });
+    const rows = r.itineraries.map((it) => `<tr>
+        <td class="num">${it.price == null ? "–" : money(it.price, watch.currency)}</td>
+        <td>${esc(it.airlines)}</td>
+        <td>${it.transfers ? `${it.transfers} (${esc(it.via)})` : "Direct"}</td>
+        <td>${hours(it.totalDuration)}</td>
+        <td>${it.kept ? "✔ kept" : `✖ ${esc(it.reason)}`}</td>
+      </tr>`).join("");
+    out.innerHTML = `${r.error ? `<p class="error">${esc(r.error)}</p>` : ""}
+      <p class="small">${r.itineraries.length} itineraries from Google, ${r.fares.length} kept
+        ${r.priceLevel ? ` · Google says prices are <b>${esc(r.priceLevel)}</b>` : ""}.
+        Prices are the round-trip total for your group.</p>
+      ${rows ? `<div class="table-wrap"><table>
+        <thead><tr><th class="num">Total</th><th>Airlines</th><th>Stops</th><th>Outbound time</th><th></th></tr></thead>
+        <tbody>${rows}</tbody></table></div>` : ""}
+      <details><summary class="small">Request sent</summary><pre>${esc(JSON.stringify(r.request, null, 2))}</pre></details>`;
+    if (r.fares.length) toast("Result saved. It will appear on the card after the next refresh.");
+  } catch (err) {
+    out.innerHTML = `<p class="error">${esc(err.message)}</p>`;
   } finally {
     button.disabled = false;
   }

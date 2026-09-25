@@ -157,6 +157,10 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
   background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px;
 }
 .diagnose [data-close] { justify-self: start; }
+.google-test { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+.google-test .field input { width: auto; }
+.check { display: flex; gap: 6px; align-items: center; font-size: 13px; color: var(--text-2); }
+.check input { width: auto; }
 
 details.trips { margin-top: 16px; }
 details.trips summary { cursor: pointer; font-weight: 550; font-size: 14px; }

@@ -7,6 +7,7 @@
 //   DELETE /watches/:id        delete a watch and its history
 //   GET    /watches/:id/trips  latest known fare per date pair (both sources)
 //   GET    /watches/:id/diagnose  live search showing how many fares each rule drops
+//   POST   /watches/:id/google-test  one Google search for chosen dates, with a full report (uses 1 search)
 //   POST   /check              run check-prices now
 
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
@@ -21,7 +22,7 @@ import {
   type Watch,
 } from "../check-prices/logic.ts";
 import { fetchTickets } from "../_shared/travelpayouts.ts";
-import { serpApiAccount } from "../_shared/serpapi.ts";
+import { googleSearchReport, serpApiAccount } from "../_shared/serpapi.ts";
 
 const GOOGLE_FRESH_DAYS = 12; // matches route_daily_best
 
@@ -97,9 +98,10 @@ Deno.serve(async (req) => {
       return json(data, 201);
     }
 
-    const match = path.match(/^\/watches\/(\d+)(\/trips|\/diagnose)?$/);
+    const match = path.match(/^\/watches\/(\d+)(\/trips|\/diagnose|\/google-test)?$/);
     if (match) {
       const id = Number(match[1]);
+      if (match[2] === "/google-test" && req.method === "POST") return json(await googleTest(db, id, await req.json()));
       if (match[2] === "/trips" && req.method === "GET") return json(await latestTrips(db, id));
       if (match[2] === "/diagnose" && req.method === "GET") return json(await diagnose(db, id));
       if (!match[2] && req.method === "PATCH") {
@@ -244,7 +246,42 @@ async function diagnose(db: SupabaseClient, watchId: number) {
     }
   }
 
-  return { today, watch: watch.name, searches, probes };
+  const { data: googleLog, error: logError } = await db.from("search_log")
+    .select("checked_on, depart_date, return_date, results, error")
+    .eq("watch_id", watchId).eq("source", "google")
+    .order("created_at", { ascending: false }).limit(30);
+  if (logError) throw logError;
+
+  return { today, watch: watch.name, searches, probes, googleLog };
+}
+
+/** One Google search for dates the user picks; logged and saved like a scheduled search. */
+async function googleTest(db: SupabaseClient, watchId: number, body: { depart?: string; ret?: string; filters?: boolean }) {
+  const isDate = (s: unknown) => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
+  if (!isDate(body.depart) || !isDate(body.ret) || body.ret! <= body.depart!) {
+    throw new Error("Pick a departure date and a later return date.");
+  }
+  const { data: row, error } = await db.from("watches").select("*").eq("id", watchId).single();
+  if (error) throw error;
+  const watch: Watch = { ...row, drop_pct: Number(row.drop_pct) };
+  const combo = { depart: body.depart!, ret: body.ret! };
+  const today = new Date().toISOString().slice(0, 10);
+
+  const report = await googleSearchReport(watch, combo, body.filters !== false);
+
+  if (report.fares.length) {
+    const { error: saveError } = await db.from("price_snapshots").upsert(
+      report.fares.map((f) => ({ ...f, watch_id: watch.id, checked_on: today, currency: watch.currency, source: "google" })),
+      { onConflict: "watch_id,checked_on,source,origin,destination,depart_date,return_date" },
+    );
+    if (saveError) throw saveError;
+  }
+  const { error: logError } = await db.from("search_log").insert({
+    watch_id: watch.id, source: "google", checked_on: today,
+    depart_date: combo.depart, return_date: combo.ret, results: report.fares.length, error: report.error,
+  });
+  if (logError) throw logError;
+  return report;
 }
 
 async function runCheck(): Promise<Response> {

@@ -24,8 +24,9 @@ import { sendEmail } from "../_shared/resend.ts";
 const HISTORY_DAYS = 14;
 const ALERT_COOLDOWN_DAYS = 7;
 const GOOGLE_FRESH_DAYS = 12; // matches route_daily_best
-// ~100 free SerpApi searches/month → 3 per day across all watches
+// ~100 free SerpApi searches/month → 3 per day across all watches, spread over 3 runs a day
 const GOOGLE_DAILY_SEARCHES = Number(Deno.env.get("SERPAPI_DAILY_SEARCHES") ?? 3);
+const GOOGLE_SEARCHES_PER_RUN = Number(Deno.env.get("SERPAPI_SEARCHES_PER_RUN") ?? 1);
 const SNAPSHOT_KEY = "watch_id,checked_on,source,origin,destination,depart_date,return_date";
 
 function env(name: string): string {
@@ -87,7 +88,7 @@ async function run(db: SupabaseClient) {
       .eq("source", "google")
       .eq("checked_on", today);
     if (countError) throw countError;
-    googleLeft = Math.max(0, GOOGLE_DAILY_SEARCHES - (count ?? 0));
+    googleLeft = Math.min(GOOGLE_SEARCHES_PER_RUN, Math.max(0, GOOGLE_DAILY_SEARCHES - (count ?? 0)));
   }
 
   const list = watches ?? [];

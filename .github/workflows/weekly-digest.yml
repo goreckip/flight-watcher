@@ -2,10 +2,11 @@ name: Weekly summary
 
 on:
   schedule:
-    # GitHub cron is UTC-only. Run at 16:00 and 17:00 UTC on Sundays and send only on the run
-    # where it's 18:xx in Warsaw, so the email arrives at 18:00 in both summer and winter time.
-    - cron: "0 16 * * 0"
-    - cron: "0 17 * * 0"
+    # Sundays ~18:03 Warsaw time. GitHub cron is UTC-only, so both the summer (UTC+2) and
+    # winter (UTC+1) variants are listed; the job skips the one that doesn't match Warsaw's
+    # current offset (by which cron fired, so a late start still sends).
+    - cron: "3 16 * * 0"  # summer
+    - cron: "3 17 * * 0"  # winter
   workflow_dispatch:
 
 jobs:
@@ -15,10 +16,16 @@ jobs:
       - name: Send weekly summary
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          FIRED: ${{ github.event.schedule }}
         run: |
-          hour=$(TZ=Europe/Warsaw date +%H)
-          if [ "${{ github.event_name }}" = "schedule" ] && [ "$hour" != "18" ]; then
-            echo "It's ${hour}:xx in Warsaw; the other scheduled run sends at 18:00."
+          offset=$(TZ=Europe/Warsaw date +%z)
+          case "$FIRED" in
+            "3 16 * * 0") season="+0200" ;;
+            "3 17 * * 0") season="+0100" ;;
+            *) season="$offset" ;;  # manual run
+          esac
+          if [ "$season" != "$offset" ]; then
+            echo "Skipping: this is the UTC${season} variant and Warsaw is at UTC${offset}."
             exit 0
           fi
           # Logs are public: print only whether it was sent.

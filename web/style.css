@@ -178,6 +178,10 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
 }
 .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
 
+.lowest { margin-top: 16px; }
+.lowest h3 { font-size: 15px; margin-bottom: 4px; }
+.lowest p { margin: 6px 0 0; }
+
 .timing { margin-top: 14px; padding: 12px 14px; border-radius: 10px; background: var(--surface-2); font-size: 14px; }
 .timing p { margin: 0 0 6px; }
 .timing p:last-child { margin-bottom: 0; }

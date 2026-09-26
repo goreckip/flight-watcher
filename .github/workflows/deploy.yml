@@ -81,3 +81,13 @@ jobs:
           supabase functions deploy check-prices --project-ref "$PROJECT_REF" --no-verify-jwt
           supabase functions deploy api --project-ref "$PROJECT_REF" --no-verify-jwt
           supabase functions deploy weekly-digest --project-ref "$PROJECT_REF" --no-verify-jwt
+
+      - name: Configure the database scheduler
+        # pg_cron (see migrations) calls the functions on schedule; this stores the URL and
+        # shared secret it needs. Safe to repeat on every deploy.
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          curl --fail-with-body -sS -X POST -H "x-cron-secret: $CRON_SECRET" -H "x-setup: 1" \
+            "https://$PROJECT_REF.supabase.co/functions/v1/check-prices" -o /dev/null
+          echo "Scheduler configured"

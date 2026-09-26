@@ -140,11 +140,11 @@ async function overview(db: SupabaseClient) {
       .order("checked_on"),
     db.from("alerts").select("*").order("sent_at", { ascending: false }).limit(20),
     serpApiAccount().catch(() => null),
-    db.from("check_runs").select("*").order("started_at", { ascending: false }).limit(10),
+    db.from("check_runs").select("*").order("started_at", { ascending: false }).limit(30),
     db.from("search_log").select("id", { count: "exact", head: true })
       .eq("source", "google").eq("checked_on", today),
     db.from("check_points")
-      .select("watch_id, checked_at, origin, destination, price, price_total, price_level, depart_date, return_date, airline, source")
+      .select("run_id, watch_id, checked_at, origin, destination, price, price_total, price_level, depart_date, return_date, airline, source")
       .gte("checked_at", `${since}T00:00:00Z`)
       .order("checked_at"),
     timingByWatch(db),

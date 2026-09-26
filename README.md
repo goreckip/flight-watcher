@@ -18,7 +18,7 @@ A personal agent that checks flight prices every day, tracks the trend, and emai
 | Database | Supabase Postgres |
 | Backend | Supabase Edge Functions (Deno / TypeScript) |
 | Dashboard | Static HTML/JS + Chart.js on GitHub Pages |
-| Daily scheduler | GitHub Actions cron |
+| Scheduler | Supabase pg_cron + pg_net: checks 07:17 / 14:05 / 20:05 and Sunday summary 18:03, Warsaw time |
 | Flight prices | Travelpayouts Data API (cached, broad) + Google Flights via SerpApi (live, exact dates, 100 free searches/month) |
 | Email | Resend |
 
@@ -52,7 +52,7 @@ All tables have row-level security on with no public policies: only the Edge Fun
 - Every day the function stores the cheapest fare for every date combination that matches a watch.
 - For each route (e.g. GDN→ATH), it takes **today's best known fare** (view `route_daily_best`) and compares it to the **median of the route's daily best over the last 14 days**.
 - If today's fare is at least `drop_pct` below that median, you get an email.
-- Alerts start after **3 days of history**, because there's no baseline before that.
+- Alerts use **earlier checks** as history: the median rule needs 3 earlier checks; a **new lowest price** (≥3% under the previous low) alerts after just 1.
 - A route that already alerted in the last 7 days only alerts again if the price drops further.
 - Prices are per adult. The family total counts adults and children aged 2+ as full seats, which is how low-cost airlines charge.
 
@@ -74,9 +74,9 @@ tests/                        unit tests for logic.ts (npm test)
 scripts/serve.mjs             local static server for web/ (npm run dev)
 .github/workflows/
   deploy.yml                  test → type-check → migrate DB → sync secrets → deploy functions
-  check-prices.yml            checks at 07:17, 14:05, 20:05 Warsaw time (CET/CEST-aware) + manual run
+  check-prices.yml            manual price check (the schedule itself runs in Supabase pg_cron)
   pages.yml                   publish web/ to GitHub Pages
-  weekly-digest.yml           Sunday 18:00 Warsaw weekly summary email (+ manual run)
+  weekly-digest.yml           send the weekly summary on demand
 ```
 
 ## Setup

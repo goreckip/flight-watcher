@@ -52,8 +52,8 @@ export interface Trip {
 
 export interface RouteEvaluation {
   alert: boolean;
-  reason: "building-baseline" | "no-significant-drop" | "already-alerted" | "price-drop";
-  baseline: number | null;
+  reason: "building-baseline" | "no-significant-drop" | "already-alerted" | "price-drop" | "new-low";
+  baseline: number | null; // what the price is compared with (median, or previous lowest for new-low)
   dropPct: number | null;
 }
 
@@ -277,31 +277,53 @@ export function median(values: number[]): number {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
+const pctBelow = (price: number, ref: number) => Math.round(((ref - price) / ref) * 1000) / 10;
+
 /**
- * Decide whether today's cheapest fare on a route is worth an email.
+ * Decide whether the current best fare on a route is worth an email. Two triggers:
  *
- * - baseline = median of the route's daily cheapest fare over previous days
- *   (median, not yesterday's price, so one noisy day doesn't trigger alerts)
- * - needs `minHistory` days of data before it will alert at all
- * - a route already alerted recently only alerts again if the price beats that alert
+ * - price-drop: at least `dropThresholdPct` below the median of earlier checks
+ *   (median, not the last price, so one noisy check doesn't trigger alerts);
+ *   needs `minHistory` earlier checks
+ * - new-low: at least `newLowPct` below the lowest price seen before; needs 1 earlier check.
+ *   Catches cheaper dates found by the rotation while the median is still being built.
+ *
+ * A route already alerted recently only alerts again if the price beats that alert.
  */
 export function evaluateRoute(
-  todayPrice: number,
+  price: number,
   history: number[],
   dropThresholdPct: number,
   recentAlertPrices: number[],
   minHistory = 3,
+  newLowPct = 3,
 ): RouteEvaluation {
+  if (history.length === 0) {
+    return { alert: false, reason: "building-baseline", baseline: null, dropPct: null };
+  }
+  const alreadyAlerted = recentAlertPrices.length > 0 && price >= Math.min(...recentAlertPrices);
+
+  if (history.length >= minHistory) {
+    const baseline = median(history);
+    const dropPct = pctBelow(price, baseline);
+    if (dropPct >= dropThresholdPct) {
+      return alreadyAlerted
+        ? { alert: false, reason: "already-alerted", baseline, dropPct }
+        : { alert: true, reason: "price-drop", baseline, dropPct };
+    }
+  }
+
+  const previousLow = Math.min(...history);
+  const belowLow = pctBelow(price, previousLow);
+  if (belowLow >= newLowPct) {
+    return alreadyAlerted
+      ? { alert: false, reason: "already-alerted", baseline: previousLow, dropPct: belowLow }
+      : { alert: true, reason: "new-low", baseline: previousLow, dropPct: belowLow };
+  }
+
   if (history.length < minHistory) {
     return { alert: false, reason: "building-baseline", baseline: null, dropPct: null };
   }
   const baseline = median(history);
-  const dropPct = Math.round(((baseline - todayPrice) / baseline) * 1000) / 10;
-  if (dropPct < dropThresholdPct) {
-    return { alert: false, reason: "no-significant-drop", baseline, dropPct };
-  }
-  if (recentAlertPrices.length > 0 && todayPrice >= Math.min(...recentAlertPrices)) {
-    return { alert: false, reason: "already-alerted", baseline, dropPct };
-  }
-  return { alert: true, reason: "price-drop", baseline, dropPct };
+  return { alert: false, reason: "no-significant-drop", baseline, dropPct: pctBelow(price, baseline) };
 }

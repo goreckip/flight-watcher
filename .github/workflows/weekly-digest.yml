@@ -1,12 +1,8 @@
-name: Weekly summary
+name: Weekly summary (manual)
 
+# The Sunday 18:03 (Warsaw) schedule runs inside Supabase with pg_cron; see
+# supabase/migrations/*_db_scheduler.sql. This workflow sends the summary on demand.
 on:
-  schedule:
-    # Sundays ~18:03 Warsaw time. GitHub cron is UTC-only, so both the summer (UTC+2) and
-    # winter (UTC+1) variants are listed; the job skips the one that doesn't match Warsaw's
-    # current offset (by which cron fired, so a late start still sends).
-    - cron: "3 16 * * 0"  # summer
-    - cron: "3 17 * * 0"  # winter
   workflow_dispatch:
 
 jobs:
@@ -16,21 +12,11 @@ jobs:
       - name: Send weekly summary
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          FIRED: ${{ github.event.schedule }}
+        # Logs are public: print only whether it was sent.
         run: |
-          offset=$(TZ=Europe/Warsaw date +%z)
-          case "$FIRED" in
-            "3 16 * * 0") season="+0200" ;;
-            "3 17 * * 0") season="+0100" ;;
-            *) season="$offset" ;;  # manual run
-          esac
-          if [ "$season" != "$offset" ]; then
-            echo "Skipping: this is the UTC${season} variant and Warsaw is at UTC${offset}."
-            exit 0
-          fi
-          # Logs are public: print only whether it was sent.
           curl --fail-with-body -sS -X POST \
             -H "x-cron-secret: $CRON_SECRET" \
+            -H "x-trigger: manual" \
             --max-time 120 \
             -o result.json \
             https://uorpnghoagbnwrdyrgre.supabase.co/functions/v1/weekly-digest \

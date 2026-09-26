@@ -64,7 +64,7 @@ const points = (() => {
       if (at > new Date()) continue;
       price = Math.round(Math.max(820, price + (rand() - 0.55) * 30 - (h === 18 ? 8 : 0)));
       list.push({
-        watch_id: 1, checked_at: at.toISOString(), origin: "GDN", destination: "ATH",
+        run_id: list.length + 1, watch_id: 1, checked_at: at.toISOString(), origin: "GDN", destination: "ATH",
         price, price_total: price * 5, price_level: price < 930 ? "low" : "typical",
         depart_date: "2027-02-02", return_date: "2027-02-08",
         airline: ["KLM", "LOT", "KLM", "Aegean", "LOT", "KLM"][Math.floor(rand() * 6)], source: "google",
@@ -140,10 +140,10 @@ export async function demoApi(method, path) {
         enabled: true, freshDays: 12, searchesToday: 3, dailyLimit: 3,
         account: { searchesLeft: 64, usedThisMonth: 36 }, coverage: { 1: { checked: 27, total: 33 } },
       },
-      runs: [{
-        trigger: "schedule", started_at: new Date(Date.now() - 3 * 3600_000).toISOString(),
-        finished_at: new Date().toISOString(), google_searches: 3, fares: 41, alerts_sent: 1, errors: [],
-      }],
+      runs: points.slice(-30).reverse().map((p) => ({
+        id: p.run_id, trigger: p.run_id % 7 === 0 ? "manual" : "schedule", started_at: p.checked_at,
+        finished_at: p.checked_at, google_searches: 1, fares: 14 + (p.run_id % 5), alerts_sent: p.run_id % 11 === 0 ? 1 : 0, errors: [],
+      })),
     };
   }
   const match = path.match(/^\/watches\/(\d+)\/trips$/);

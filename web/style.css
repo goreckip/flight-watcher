@@ -130,6 +130,8 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
 }
 .status p { margin: 2px 0; }
 .status b { color: var(--text); font-weight: 600; }
+.status .history { margin-top: 6px; }
+.status .history summary { cursor: pointer; color: var(--text); font-weight: 550; }
 .card-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .pill {
   font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px;

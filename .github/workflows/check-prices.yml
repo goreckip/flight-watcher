@@ -1,20 +1,9 @@
-name: Check prices
+name: Check prices (manual)
 
-# Three checks a day at 07:17, 14:05 and 20:05 Warsaw time, 1 Google search each
-# (the free SerpApi plan allows ~3 a day). A few minutes past the hour because GitHub
-# delays and sometimes drops runs scheduled at :00.
-#
-# GitHub cron is UTC-only, so each time is listed for both summer (UTC+2) and winter (UTC+1).
-# The job skips the variant that doesn't match Warsaw's current offset. It checks which cron
-# fired rather than the clock, so a late start still runs.
+# The schedule (07:17, 14:05, 20:05 Warsaw time) runs inside Supabase with pg_cron; see
+# supabase/migrations/*_db_scheduler.sql. GitHub's free scheduler started runs hours late.
+# This workflow remains as a manual backup: Actions → Check prices (manual) → Run workflow.
 on:
-  schedule:
-    - cron: "17 5 * * *"  # summer 07:17
-    - cron: "5 12 * * *"  # summer 14:05
-    - cron: "5 18 * * *"  # summer 20:05
-    - cron: "17 6 * * *"  # winter 07:17
-    - cron: "5 13 * * *"  # winter 14:05
-    - cron: "5 19 * * *"  # winter 20:05
   workflow_dispatch:
 
 jobs:
@@ -24,23 +13,11 @@ jobs:
       - name: Run check-prices
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          FIRED: ${{ github.event.schedule }}
         # Logs are public on a public repo, so print only totals, not routes, dates or prices.
-        # Full details are on the dashboard.
         run: |
-          offset=$(TZ=Europe/Warsaw date +%z)
-          case "$FIRED" in
-            "17 5 * * *"|"5 12 * * *"|"5 18 * * *") season="+0200" ;;
-            "17 6 * * *"|"5 13 * * *"|"5 19 * * *") season="+0100" ;;
-            *) season="$offset" ;;  # manual run
-          esac
-          if [ "$season" != "$offset" ]; then
-            echo "Skipping: this is the UTC${season} variant and Warsaw is at UTC${offset}."
-            exit 0
-          fi
           curl --fail-with-body -sS -X POST \
             -H "x-cron-secret: $CRON_SECRET" \
-            -H "x-trigger: schedule" \
+            -H "x-trigger: manual" \
             --max-time 150 \
             -o result.json \
             https://uorpnghoagbnwrdyrgre.supabase.co/functions/v1/check-prices \

@@ -46,6 +46,17 @@ Deno.serve(async (req) => {
   const db = createClient(env("SUPABASE_URL"), env("SUPABASE_SERVICE_ROLE_KEY"), {
     auth: { persistSession: false },
   });
+
+  // Deploy-time setup: store what the database scheduler (pg_cron) needs to call us.
+  if (req.headers.get("x-setup") === "1") {
+    const { error } = await db.from("app_config").upsert([
+      { key: "cron_secret", value: secret, updated_at: new Date().toISOString() },
+      { key: "functions_url", value: `${env("SUPABASE_URL")}/functions/v1`, updated_at: new Date().toISOString() },
+    ]);
+    if (error) return Response.json({ error: error.message }, { status: 500 });
+    return Response.json({ ok: true });
+  }
+
   // Every run is recorded so the dashboard can show when checks happened and what they found.
   const trigger = req.headers.get("x-trigger") === "manual" ? "manual" : "schedule";
   const { data: runRow } = await db.from("check_runs").insert({ trigger }).select("id").single();
@@ -138,16 +149,6 @@ async function run(db: SupabaseClient, runId: number | null) {
       .select("*").eq("watch_id", watch.id).eq("checked_on", today);
     if (bestError) throw bestError;
 
-    // One chart point per route per check: the best known fare right now.
-    if (todays?.length) {
-      const { error: pointError } = await db.from("check_points").insert(todays.map((r) => ({
-        run_id: runId, watch_id: watch.id, origin: r.origin, destination: r.destination,
-        price: r.price, price_total: r.price_total, price_level: r.price_level, currency: r.currency,
-        depart_date: r.depart_date, return_date: r.return_date, airline: r.airline, source: r.source,
-      })));
-      if (pointError) throw pointError;
-    }
-
     for (const row of todays ?? []) {
       const best: AlertTrip = {
         origin: row.origin,
@@ -174,12 +175,26 @@ async function run(db: SupabaseClient, runId: number | null) {
         price: best.price,
         source: best.source,
         dates: `${best.depart_date}..${best.return_date}`,
-        historyDays: history.length,
+        earlierChecks: history.length,
         ...result,
       });
       if (result.alert) {
-        alerts.push({ watch, trip: best, baseline: result.baseline!, dropPct: result.dropPct! });
+        alerts.push({
+          watch, trip: best, baseline: result.baseline!, dropPct: result.dropPct!,
+          reason: result.reason as "price-drop" | "new-low",
+        });
       }
+    }
+
+    // One chart point per route per check: the best known fare right now. Written after the
+    // evaluation above, so a check never counts as its own history.
+    if (todays?.length) {
+      const { error: pointError } = await db.from("check_points").insert(todays.map((r) => ({
+        run_id: runId, watch_id: watch.id, origin: r.origin, destination: r.destination,
+        price: r.price, price_total: r.price_total, price_level: r.price_level, currency: r.currency,
+        depart_date: r.depart_date, return_date: r.return_date, airline: r.airline, source: r.source,
+      })));
+      if (pointError) throw pointError;
     }
   }
 
@@ -293,18 +308,27 @@ async function googleSearches(db: SupabaseClient, watch: Watch, today: string, b
   return out;
 }
 
-/** Best known fare for this route on each of the previous HISTORY_DAYS days (today excluded). */
+/**
+ * Best fare for this route at each earlier check in the last HISTORY_DAYS days. Days from
+ * before per-check points existed contribute their daily best instead.
+ */
 async function routeHistory(db: SupabaseClient, watchId: number, trip: Trip, today: string) {
-  const { data, error } = await db
-    .from("route_daily_best")
-    .select("price")
-    .eq("watch_id", watchId)
-    .eq("origin", trip.origin)
-    .eq("destination", trip.destination)
-    .gte("checked_on", addDays(today, -HISTORY_DAYS))
-    .lt("checked_on", today);
-  if (error) throw error;
-  return (data ?? []).map((r) => Number(r.price));
+  const since = addDays(today, -HISTORY_DAYS);
+  const [points, daily] = await Promise.all([
+    db.from("check_points").select("price, checked_at")
+      .eq("watch_id", watchId).eq("origin", trip.origin).eq("destination", trip.destination)
+      .gte("checked_at", `${since}T00:00:00Z`),
+    db.from("route_daily_best").select("price, checked_on")
+      .eq("watch_id", watchId).eq("origin", trip.origin).eq("destination", trip.destination)
+      .gte("checked_on", since).lt("checked_on", today),
+  ]);
+  if (points.error) throw points.error;
+  if (daily.error) throw daily.error;
+  const daysWithPoints = new Set((points.data ?? []).map((p) => String(p.checked_at).slice(0, 10)));
+  return [
+    ...(points.data ?? []).map((p) => Number(p.price)),
+    ...(daily.data ?? []).filter((d) => !daysWithPoints.has(d.checked_on)).map((d) => Number(d.price)),
+  ];
 }
 
 async function recentAlertPrices(db: SupabaseClient, watchId: number, trip: Trip) {

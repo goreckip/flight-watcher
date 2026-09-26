@@ -122,24 +122,31 @@ function cssVar(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
-/** Summary numbers for one watch, from the per-route daily cheapest fares. */
-function summarize(watch) {
-  const rows = data.daily.filter((r) => r.watch_id === watch.id);
-  if (!rows.length) return null;
+const MIN_EARLIER_CHECKS = 3; // same rule as the email alerts
 
-  // Cheapest across all routes, per day
-  const byDay = new Map();
-  for (const r of rows) {
-    const cur = byDay.get(r.checked_on);
-    if (!cur || Number(r.price) < Number(cur.price)) byDay.set(r.checked_on, r);
+/**
+ * Summary numbers for one watch, on the same basis as the alerts: the best fare at the latest
+ * check, compared with the median of earlier checks (last 14 days) and the previous lowest.
+ */
+function summarize(watch) {
+  const { all, slots, sortKey } = chartPoints(watch);
+  if (!all.length) return null;
+
+  // Best fare across routes at each check
+  const bestAt = new Map();
+  for (const p of all) {
+    const k = sortKey(p);
+    const cur = bestAt.get(k);
+    if (!cur || Number(p.price) < Number(cur.price)) bestAt.set(k, p);
   }
-  const days = [...byDay.keys()].sort();
-  const lastDay = days.at(-1);
-  const best = byDay.get(lastDay);
-  const baselineDays = days.filter((d) => d < lastDay && d >= addDays(lastDay, -BASELINE_DAYS));
-  const baseline = baselineDays.length ? median(baselineDays.map((d) => Number(byDay.get(d).price))) : null;
+  const latest = slots.at(-1);
+  const best = bestAt.get(latest.key);
+  const since = addDays(latest.day, -BASELINE_DAYS);
+  const earlier = slots.slice(0, -1).filter((s) => s.day >= since).map((s) => Number(bestAt.get(s.key).price));
+  const baseline = earlier.length >= MIN_EARLIER_CHECKS ? median(earlier) : null;
   const change = baseline ? ((Number(best.price) - baseline) / baseline) * 100 : null;
-  return { rows, lastDay, best, baseline, change, historyDays: baselineDays.length };
+  const previousLow = earlier.length ? Math.min(...earlier) : null;
+  return { best, latest, baseline, change, earlierChecks: earlier.length, previousLow };
 }
 
 function statTiles(watch, s) {
@@ -147,17 +154,24 @@ function statTiles(watch, s) {
   const seats = payingSeats(watch);
   const cur = watch.currency;
   const price = Number(s.best.price);
+  const vsLow = s.previousLow
+    ? (() => {
+      const pct = ((price - s.previousLow) / s.previousLow) * 100;
+      return pct <= -0.05 ? `new lowest (was ${money(s.previousLow, cur)})` : `lowest before: ${money(s.previousLow, cur)}`;
+    })()
+    : "";
   let changeTile;
   if (s.change === null) {
-    changeTile = `<div class="stat"><span class="stat-label">vs ${BASELINE_DAYS}-day median</span>
-      <span class="stat-value">–</span><span class="stat-sub">Building history (needs 3 days)</span></div>`;
+    changeTile = `<div class="stat"><span class="stat-label">vs recent checks</span>
+      <span class="stat-value">–</span>
+      <span class="stat-sub">Needs ${MIN_EARLIER_CHECKS} earlier checks (has ${s.earlierChecks})${vsLow ? ` · ${vsLow}` : ""}</span></div>`;
   } else {
     const down = s.change < 0;
     const cls = s.change <= -0.5 ? "delta-down" : s.change >= 0.5 ? "delta-up" : "";
     const arrow = s.change <= -0.5 ? "▼" : s.change >= 0.5 ? "▲" : "●";
-    changeTile = `<div class="stat"><span class="stat-label">vs ${BASELINE_DAYS}-day median</span>
+    changeTile = `<div class="stat"><span class="stat-label">vs recent checks</span>
       <span class="stat-value ${cls}">${arrow} ${down ? "−" : "+"}${Math.abs(s.change).toFixed(1)}%</span>
-      <span class="stat-sub">median ${money(s.baseline, cur)} · ${s.historyDays} day${s.historyDays === 1 ? "" : "s"} of history</span></div>`;
+      <span class="stat-sub">median ${money(s.baseline, cur)} of ${s.earlierChecks} earlier checks · ${vsLow}</span></div>`;
   }
   const total = groupTotal(s.best, watch);
   const level = s.best.price_level ? ` · Google: prices <b>${esc(s.best.price_level)}</b>` : "";
@@ -618,8 +632,45 @@ function renderStatus() {
   }
   lines.push(`<b>Schedule:</b> automatic checks daily at 07:17, 14:05 and 20:05 (Warsaw time), 1 Google search each · weekly summary Sundays 18:03`);
 
-  el.innerHTML = lines.map((l) => `<p>${l}</p>`).join("");
+  el.innerHTML = lines.map((l) => `<p>${l}</p>`).join("") + checkHistory();
   el.hidden = false;
+}
+
+/** Every recent check (scheduled or manual) with what it found. */
+function checkHistory() {
+  const runs = data.runs ?? [];
+  if (!runs.length) return "";
+  const bestByRun = new Map();
+  for (const p of data.points ?? []) {
+    if (p.run_id == null) continue;
+    const cur = bestByRun.get(p.run_id);
+    if (!cur || Number(p.price) < Number(cur.price)) bestByRun.set(p.run_id, p);
+  }
+  const watchById = new Map(data.watches.map((w) => [w.id, w]));
+  const rows = runs.map((r) => {
+    const best = bestByRun.get(r.id);
+    const w = best && watchById.get(best.watch_id);
+    const errs = Array.isArray(r.errors) ? r.errors.length : 0;
+    const status = r.failed ? `<span class="error">failed</span>`
+      : !r.finished_at ? "running…"
+      : errs ? `<span class="error">${errs} error(s)</span>` : "ok";
+    return `<tr>
+      <td>${esc(checkLabelFmt.format(new Date(r.started_at)))}</td>
+      <td>${r.trigger === "manual" ? "manual" : "scheduled"}</td>
+      <td class="num">${r.google_searches ?? "–"}</td>
+      <td class="num">${r.fares ?? "–"}</td>
+      <td class="num">${best ? `<b>${money(best.price, w?.currency ?? "")}</b>` : "–"}</td>
+      <td>${best ? `${esc(airlineName(best.airline))} · ${fmtShort(best.depart_date)} – ${fmtShort(best.return_date)}` : ""}</td>
+      <td class="num">${r.alerts_sent ?? 0}</td>
+      <td>${status}</td>
+    </tr>`;
+  }).join("");
+  return `<details class="history"><summary>All checks (last ${runs.length})</summary>
+    <div class="table-wrap"><table>
+      <thead><tr><th>When (Warsaw)</th><th>Type</th><th class="num">Google searches</th><th class="num">Fares</th>
+        <th class="num">Best / person</th><th>Best fare</th><th class="num">Alerts</th><th>Status</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div></details>`;
 }
 
 async function loadTrips(card, watch) {

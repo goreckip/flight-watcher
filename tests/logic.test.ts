@@ -221,8 +221,26 @@ test("median", () => {
   assert.equal(median([4, 1, 3, 2]), 2.5);
 });
 
-test("evaluateRoute waits for a baseline", () => {
-  assert.equal(evaluateRoute(100, [200, 200], 10, []).reason, "building-baseline");
+test("evaluateRoute waits for a baseline when nothing is a new low", () => {
+  assert.equal(evaluateRoute(100, [], 10, []).reason, "building-baseline");
+  assert.equal(evaluateRoute(200, [200, 205], 10, []).reason, "building-baseline");
+});
+
+test("evaluateRoute alerts on a new lowest price after a single earlier check", () => {
+  // the real case: 1076 → 908 while the median was still being built
+  const r = evaluateRoute(908, [1076], 10, []);
+  assert.equal(r.alert, true);
+  assert.equal(r.reason, "new-low");
+  assert.equal(r.baseline, 1076);
+  assert.equal(r.dropPct, 15.6);
+  // under 3% below the previous low: not worth an email
+  assert.equal(evaluateRoute(1050, [1076], 10, []).alert, false);
+  // new low but already alerted at an even lower price
+  assert.equal(evaluateRoute(900, [1076, 950], 10, [880]).reason, "already-alerted");
+});
+
+test("evaluateRoute prefers the median rule once there's enough history", () => {
+  assert.equal(evaluateRoute(880, [1000, 1000, 1000, 900], 10, []).reason, "price-drop");
 });
 
 test("evaluateRoute alerts on a drop at or above the threshold", () => {
@@ -233,7 +251,8 @@ test("evaluateRoute alerts on a drop at or above the threshold", () => {
 });
 
 test("evaluateRoute ignores small drops", () => {
-  assert.equal(evaluateRoute(470, [500, 500, 500], 10, []).reason, "no-significant-drop");
+  // 6% under the median (< 10%) and only 2% under the previous low (< 3%)
+  assert.equal(evaluateRoute(470, [500, 500, 480], 10, []).reason, "no-significant-drop");
 });
 
 test("evaluateRoute does not repeat an alert unless the price beats it", () => {

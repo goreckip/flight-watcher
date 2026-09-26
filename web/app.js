@@ -180,6 +180,77 @@ function groupTotal(fare, watch) {
   return { amount: Number(fare.price) * payingSeats(watch), exact: false };
 }
 
+/**
+ * The 10 lowest fares seen across all checks, cheapest first. Identical fares (same route,
+ * dates, airline, price and source) seen at several checks are one row with a first/last-seen
+ * timeline, so a long-lasting fare doesn't fill the whole table.
+ */
+function lowestChecksTable(watch) {
+  const { all, slots, sortKey } = chartPoints(watch);
+  if (!all.length) return "";
+  const seats = payingSeats(watch);
+  const colors = airlineColors(watch, all);
+  // "Now" = best fare at the most recent check.
+  const latestKey = slots.at(-1).key;
+  const current = all.filter((p) => sortKey(p) === latestKey)
+    .reduce((a, b) => (!a || Number(b.price) < Number(a.price) ? b : a), null);
+
+  const groups = new Map();
+  for (const p of all) {
+    const key = [p.origin, p.destination, p.depart_date, p.return_date, airlineName(p.airline), Number(p.price), p.source].join("|");
+    const when = p.at ?? `${p.day}T12:00:00Z`;
+    const g = groups.get(key);
+    if (!g) groups.set(key, { p, first: p, last: p, firstAt: when, lastAt: when, checks: 1 });
+    else {
+      g.checks++;
+      if (when < g.firstAt) Object.assign(g, { first: p, firstAt: when });
+      if (when > g.lastAt) Object.assign(g, { last: p, lastAt: when });
+    }
+  }
+  const rows = [...groups.values()]
+    .sort((a, b) => Number(a.p.price) - Number(b.p.price) || a.firstAt.localeCompare(b.firstAt))
+    .slice(0, 10);
+
+  const whenText = (p) => p.at ? checkLabelFmt.format(new Date(p.at)) : `${dayLabelFmt.format(new Date(p.day))}`;
+  const vsNow = (price) => {
+    if (!current) return "";
+    const pct = ((Number(price) - Number(current.price)) / Number(current.price)) * 100;
+    if (Math.abs(pct) < 0.05) return `<span class="muted">= now</span>`;
+    return pct < 0
+      ? `<span class="delta-down">▼ ${Math.abs(pct).toFixed(1)}%</span>`
+      : `<span class="delta-up">▲ ${pct.toFixed(1)}%</span>`;
+  };
+
+  const body = rows.map((g, i) => {
+    const p = g.p;
+    const total = groupTotal(p, watch);
+    const name = airlineName(p.airline);
+    return `<tr>
+      <td class="num muted">${i + 1}</td>
+      <td class="num"><b>${money(p.price, watch.currency)}</b></td>
+      ${seats > 1 ? `<td class="num">${total.exact ? "" : "~"}${money(total.amount, watch.currency)}</td>` : ""}
+      <td><span class="legend-item"><span class="swatch" style="background:${colors.get(name)}"></span>${esc(name)}</span></td>
+      <td>${fmtShort(p.depart_date)} – ${fmtShort(p.return_date)} <span class="muted">(${nightsBetween(p.depart_date, p.return_date)} n)</span></td>
+      <td>${esc(p.origin)} → ${esc(p.destination)}</td>
+      <td>${g.checks > 1 ? `${whenText(g.first)} → ${whenText(g.last)}` : whenText(g.first)}</td>
+      <td class="num">${g.checks}</td>
+      <td>${sourceLabel(p.source)}${p.price_level ? ` <span class="muted">(${esc(p.price_level)})</span>` : ""}</td>
+      <td>${vsNow(p.price)}</td>
+    </tr>`;
+  }).join("");
+
+  return `<section class="lowest">
+    <h3>Lowest prices seen <span class="muted small">(top 10, cheapest first)</span></h3>
+    <div class="table-wrap"><table>
+      <thead><tr><th class="num">#</th><th class="num">Per person</th>${seats > 1 ? `<th class="num">${seats} seats</th>` : ""}
+        <th>Airline</th><th>Trip</th><th>Route</th><th>Seen (first → last check)</th><th class="num">Checks</th>
+        <th>Source</th><th>vs now</th></tr></thead>
+      <tbody>${body}</tbody>
+    </table></div>
+    <p class="muted small">Each row is one fare. If the same flight and price was the best at several checks in a row, it appears once with when it was first and last seen. Times are Warsaw time.</p>
+  </section>`;
+}
+
 const SLOT_LABELS = { morning: "Morning (07:17)", afternoon: "Afternoon (14:05)", evening: "Evening (20:05)" };
 
 /**
@@ -241,6 +312,7 @@ function watchCard(watch) {
        <div class="chart-wrap"><canvas aria-label="Price history chart for ${esc(watch.name)}" role="img"></canvas></div>
        <div class="airline-legend"></div>
        ${timingBlock(watch)}
+       ${lowestChecksTable(watch)}
        <details class="trips"><summary>Latest known fares</summary><div class="trips-body"><p class="muted small">Loading…</p></div></details>`
     : `<div class="empty">No fares recorded yet. They appear after the next daily check, or click <b>Check prices now</b>.</div>`;
 

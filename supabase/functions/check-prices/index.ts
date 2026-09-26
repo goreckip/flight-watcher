@@ -42,19 +42,33 @@ Deno.serve(async (req) => {
     return new Response("Unauthorized", { status: 401 });
   }
 
-  try {
-    const summary = await run();
-    return Response.json(summary);
-  } catch (err) {
-    console.error(err);
-    return Response.json({ error: String(err) }, { status: 500 });
-  }
-});
-
-async function run() {
   const db = createClient(env("SUPABASE_URL"), env("SUPABASE_SERVICE_ROLE_KEY"), {
     auth: { persistSession: false },
   });
+  // Every run is recorded so the dashboard can show when checks happened and what they found.
+  const trigger = req.headers.get("x-trigger") === "manual" ? "manual" : "schedule";
+  const { data: runRow } = await db.from("check_runs").insert({ trigger }).select("id").single();
+  const finish = (fields: Record<string, unknown>) =>
+    runRow ? db.from("check_runs").update({ finished_at: new Date().toISOString(), ...fields }).eq("id", runRow.id) : null;
+
+  try {
+    const summary = await run(db);
+    await finish({
+      google_searches: summary.watches.reduce((n, w) => n + Number((w.google as { searches?: number })?.searches ?? 0), 0),
+      fares: summary.watches.reduce((n, w) => n + Number(w.fares ?? 0), 0),
+      alerts_sent: summary.alertsSent,
+      errors: summary.errors,
+    });
+    return Response.json(summary);
+  } catch (err) {
+    console.error(err);
+    const message = String((err as { message?: string }).message ?? err);
+    await finish({ failed: message });
+    return Response.json({ error: message }, { status: 500 });
+  }
+});
+
+async function run(db: SupabaseClient) {
   const today = new Date().toISOString().slice(0, 10);
 
   const { data: watches, error } = await db.from("watches").select("*").eq("active", true);

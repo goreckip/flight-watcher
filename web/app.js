@@ -326,13 +326,44 @@ function render() {
   }
   renderAlerts();
 
-  const quota = $("#quota");
-  const account = data.google?.account;
-  quota.hidden = !account || account.searchesLeft == null;
-  if (!quota.hidden) {
-    quota.textContent = `Google Flights searches left this month: ${account.searchesLeft}`
-      + (account.usedThisMonth != null ? ` (used ${account.usedThisMonth})` : "");
+  renderStatus();
+}
+
+const timeFmt = new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+
+/** Last check, today's Google budget and the schedule, so it's clear what ran and what will. */
+function renderStatus() {
+  const el = $("#status");
+  const g = data.google ?? {};
+  const last = data.runs?.[0];
+  const lines = [];
+
+  if (last) {
+    const when = timeFmt.format(new Date(last.started_at));
+    const how = last.trigger === "manual" ? "manual" : "scheduled";
+    let result;
+    if (last.failed) result = `<span class="error">failed: ${esc(last.failed)}</span>`;
+    else if (!last.finished_at) result = "still running…";
+    else {
+      const errs = Array.isArray(last.errors) ? last.errors.length : 0;
+      result = `${last.google_searches ?? 0} Google search${last.google_searches === 1 ? "" : "es"}, `
+        + `${last.fares ?? 0} matching fares${errs ? `, <span class="error">${errs} error(s)</span>` : ""}`;
+    }
+    lines.push(`<b>Last check:</b> ${when} (${how}): ${result}`);
+  } else {
+    lines.push(`<b>Last check:</b> none recorded yet`);
   }
+
+  if (g.enabled) {
+    const left = Math.max(0, (g.dailyLimit ?? 3) - (g.searchesToday ?? 0));
+    lines.push(`<b>Google today:</b> ${g.searchesToday ?? 0} of ${g.dailyLimit ?? 3} searches used`
+      + (left ? `, ${left} left for “Check prices now”` : ", more tomorrow")
+      + (g.account?.searchesLeft != null ? ` · ${g.account.searchesLeft} left this month` : ""));
+  }
+  lines.push(`<b>Schedule:</b> automatic check every day around 07:15 (Warsaw time) · weekly summary Sundays 18:00`);
+
+  el.innerHTML = lines.map((l) => `<p>${l}</p>`).join("");
+  el.hidden = false;
 }
 
 async function loadTrips(card, watch) {

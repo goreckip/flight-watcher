@@ -97,7 +97,14 @@ export async function demoApi(method, path) {
   if (method === "GET" && path === "/overview") {
     return {
       watches, daily, alerts,
-      google: { enabled: true, freshDays: 12, account: { searchesLeft: 64, usedThisMonth: 36 }, coverage: { 1: { checked: 27, total: 33 } } },
+      google: {
+        enabled: true, freshDays: 12, searchesToday: 3, dailyLimit: 3,
+        account: { searchesLeft: 64, usedThisMonth: 36 }, coverage: { 1: { checked: 27, total: 33 } },
+      },
+      runs: [{
+        trigger: "schedule", started_at: new Date(Date.now() - 3 * 3600_000).toISOString(),
+        finished_at: new Date().toISOString(), google_searches: 3, fares: 41, alerts_sent: 1, errors: [],
+      }],
     };
   }
   const match = path.match(/^\/watches\/(\d+)\/trips$/);

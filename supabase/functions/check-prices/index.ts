@@ -18,7 +18,7 @@ import {
 } from "./logic.ts";
 import { type AlertTrip, alertHtml, alertSubject, type PriceAlert } from "./email.ts";
 import { fetchTickets } from "../_shared/travelpayouts.ts";
-import { searchGoogleFlights } from "../_shared/serpapi.ts";
+import { type GoogleFare, searchGoogleFlights } from "../_shared/serpapi.ts";
 import { sendEmail } from "../_shared/resend.ts";
 
 const HISTORY_DAYS = 14;
@@ -53,7 +53,7 @@ Deno.serve(async (req) => {
     runRow ? db.from("check_runs").update({ finished_at: new Date().toISOString(), ...fields }).eq("id", runRow.id) : null;
 
   try {
-    const summary = await run(db);
+    const summary = await run(db, runRow?.id ?? null);
     await finish({
       google_searches: summary.watches.reduce((n, w) => n + Number((w.google as { searches?: number })?.searches ?? 0), 0),
       fares: summary.watches.reduce((n, w) => n + Number(w.fares ?? 0), 0),
@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
   }
 });
 
-async function run(db: SupabaseClient) {
+async function run(db: SupabaseClient, runId: number | null) {
   const today = new Date().toISOString().slice(0, 10);
 
   const { data: watches, error } = await db.from("watches").select("*").eq("active", true);
@@ -118,6 +118,12 @@ async function run(db: SupabaseClient) {
     googleLeft -= google.searches;
     errors.push(...google.errors);
 
+    // Time-stamped record of every fare this check saw (for "when are prices lowest?").
+    await recordObservations(db, runId, watch, [
+      ...trips.map((t) => ({ ...t, source: "travelpayouts", price_total: null })),
+      ...google.found.map((f) => ({ ...f, source: "google" })),
+    ]);
+
     checked.push({
       watch: watch.name,
       searches: plan.length,
@@ -131,6 +137,16 @@ async function run(db: SupabaseClient) {
     const { data: todays, error: bestError } = await db.from("route_daily_best")
       .select("*").eq("watch_id", watch.id).eq("checked_on", today);
     if (bestError) throw bestError;
+
+    // One chart point per route per check: the best known fare right now.
+    if (todays?.length) {
+      const { error: pointError } = await db.from("check_points").insert(todays.map((r) => ({
+        run_id: runId, watch_id: watch.id, origin: r.origin, destination: r.destination,
+        price: r.price, price_total: r.price_total, price_level: r.price_level, currency: r.currency,
+        depart_date: r.depart_date, return_date: r.return_date, airline: r.airline, source: r.source,
+      })));
+      if (pointError) throw pointError;
+    }
 
     for (const row of todays ?? []) {
       const best: AlertTrip = {
@@ -190,6 +206,25 @@ async function run(db: SupabaseClient) {
 }
 
 
+interface ObservedFare {
+  source: string;
+  origin: string;
+  destination: string;
+  depart_date: string;
+  return_date: string;
+  price: number;
+  price_total: number | null;
+}
+
+async function recordObservations(db: SupabaseClient, runId: number | null, watch: Watch, fares: ObservedFare[]) {
+  if (!fares.length) return;
+  const { error } = await db.from("price_observations").insert(fares.map((f) => ({
+    run_id: runId, watch_id: watch.id, source: f.source, origin: f.origin, destination: f.destination,
+    depart_date: f.depart_date, return_date: f.return_date, price: f.price, price_total: f.price_total,
+  })));
+  if (error) throw error;
+}
+
 async function saveTravelpayouts(db: SupabaseClient, watch: Watch, trips: Trip[], today: string) {
   if (trips.length === 0) return;
   const { error } = await db.from("price_snapshots").upsert(
@@ -206,7 +241,7 @@ async function saveTravelpayouts(db: SupabaseClient, watch: Watch, trips: Trip[]
  * results. Every search is logged (even empty or failed ones) to drive the rotation and quota.
  */
 async function googleSearches(db: SupabaseClient, watch: Watch, today: string, budget: number) {
-  const out = { searches: 0, fares: 0, errors: [] as string[] };
+  const out = { searches: 0, fares: 0, errors: [] as string[], found: [] as GoogleFare[] };
   const combos = tripCombos(watch, today);
   if (budget <= 0 || combos.length === 0) return out;
 
@@ -237,6 +272,7 @@ async function googleSearches(db: SupabaseClient, watch: Watch, today: string, b
       const fares = await searchGoogleFlights(watch, combo);
       results = fares.length;
       out.fares += fares.length;
+      out.found.push(...fares);
       if (fares.length) {
         const { error } = await db.from("price_snapshots").upsert(
           fares.map((f) => ({ ...f, watch_id: watch.id, checked_on: today, currency: watch.currency, source: "google" })),

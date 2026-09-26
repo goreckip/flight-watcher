@@ -180,6 +180,39 @@ function groupTotal(fare, watch) {
   return { amount: Number(fare.price) * payingSeats(watch), exact: false };
 }
 
+const SLOT_LABELS = { morning: "Morning (07:17)", afternoon: "Afternoon (14:05)", evening: "Evening (20:05)" };
+
+/**
+ * "When are prices lowest?" Each observation is compared with the same flight's own average,
+ * so the numbers show timing effects rather than differences between trips.
+ */
+function timingBlock(watch) {
+  const t = data.timing?.[watch.id];
+  const fmtDev = (v) => `${v > 0 ? "+" : v < 0 ? "−" : "±"}${Math.abs(v).toFixed(1)}%`;
+  const cell = (b, label) => `<span class="tchip${b.avgDeviationPct <= -0.5 ? " low" : ""}">
+      ${esc(label)} <b>${fmtDev(b.avgDeviationPct)}</b> <span class="muted">(${b.observations})</span></span>`;
+
+  if (!t || !t.observations) {
+    return `<div class="timing"><b>When are prices lowest?</b>
+      <span class="muted">Collecting data: each check records prices with its time. This needs about two weeks to be meaningful.</span></div>`;
+  }
+  const best = (list) => list.filter((b) => b.observations >= 3)
+    .reduce((a, b) => (!a || b.avgDeviationPct < a.avgDeviationPct ? b : a), null);
+  const bestSlot = best(t.bySlot);
+  const bestDay = best(t.byWeekday);
+  const headline = t.reliable && bestSlot
+    ? `So far, prices are lowest in the <b>${esc(SLOT_LABELS[bestSlot.key].split(" (")[0].toLowerCase())}</b>`
+      + (bestDay ? ` and on <b>${esc(bestDay.key)}</b>` : "") + "."
+    : `<span class="muted">Early data: not enough yet to call a pattern (${t.observations} observations of ${t.itineraries} flights).</span>`;
+
+  return `<div class="timing">
+    <p><b>When are prices lowest?</b> ${headline}</p>
+    <p class="tchips">${t.bySlot.map((b) => cell(b, SLOT_LABELS[b.key])).join("")}</p>
+    ${t.byWeekday.length ? `<p class="tchips">${t.byWeekday.map((b) => cell(b, b.key)).join("")}</p>` : ""}
+    <p class="muted small">Average price vs the same flight's own average, by check time and weekday (Warsaw time). Negative means cheaper. Number of observations in brackets.</p>
+  </div>`;
+}
+
 function coverageLine(watch) {
   const g = data.google;
   if (!g?.enabled) return "";
@@ -204,8 +237,9 @@ function watchCard(watch) {
 
   const body = s
     ? `${statTiles(watch, s)}
-       <p class="chart-title">Cheapest fare per person, by day of check${s.lastDay ? ` · last checked ${fmtDate(s.lastDay)}` : ""}</p>
+       <p class="chart-title">Best fare per person at each check · hover a point for the check time and details</p>
        <div class="chart-wrap"><canvas aria-label="Price history chart for ${esc(watch.name)}" role="img"></canvas></div>
+       ${timingBlock(watch)}
        <details class="trips"><summary>Latest known fares</summary><div class="trips-body"><p class="muted small">Loading…</p></div></details>`
     : `<div class="empty">No fares recorded yet. They appear after the next daily check, or click <b>Check prices now</b>.</div>`;
 
@@ -228,28 +262,63 @@ function watchCard(watch) {
   </article>`;
 }
 
+// Check times are shown in Warsaw time, matching the schedule.
+const WARSAW = "Europe/Warsaw";
+const checkLabelFmt = new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: WARSAW });
+const checkTitleFmt = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit", timeZone: WARSAW });
+const dayLabelFmt = new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
+const dayTitleFmt = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" });
+
+/**
+ * Chart points for a watch: one per check (with time) where recorded, plus one per day for
+ * earlier days that only have the daily summary.
+ */
+function chartPoints(watch) {
+  const points = (data.points ?? []).filter((p) => p.watch_id === watch.id)
+    .map((p) => ({ ...p, at: p.checked_at, day: p.checked_at.slice(0, 10) }));
+  const daysWithPoints = new Set(points.map((p) => p.day));
+  const daily = data.daily.filter((r) => r.watch_id === watch.id && !daysWithPoints.has(r.checked_on))
+    .map((r) => ({ ...r, at: null, day: r.checked_on }));
+  const all = [...daily, ...points];
+  const sortKey = (p) => p.at ?? `${p.day}T12:00:00Z`;
+  // Distinct x positions: each check time, or each day without check times.
+  const slots = [...new Map(all.map((p) => [sortKey(p), p])).values()]
+    .sort((a, b) => sortKey(a).localeCompare(sortKey(b)))
+    .map((p) => ({ key: sortKey(p), at: p.at, day: p.day }));
+  return { all, slots, sortKey };
+}
+
 function renderChart(card, watch) {
   const canvas = $("canvas", card);
   if (!canvas || !window.Chart) return;
-  const s = summarize(watch);
-  const days = [...new Set(s.rows.map((r) => r.checked_on))].sort();
-  const routes = [...new Set(s.rows.map((r) => `${r.origin} → ${r.destination}`))];
+  const { all, slots, sortKey } = chartPoints(watch);
+  const slotIndex = new Map(slots.map((s, i) => [s.key, i]));
+  const routes = [...new Set(all.map((r) => `${r.origin} → ${r.destination}`))];
   // Color follows the route in the watch's own order, never its rank.
   const ordered = watch.destinations.flatMap((d) => watch.origins.map((o) => `${o} → ${d}`))
     .filter((r) => routes.includes(r))
     .concat(routes.filter((r) => !watch.destinations.some((d) => r.endsWith(d))));
 
+  const seats = payingSeats(watch);
   const datasets = ordered.map((route, i) => {
     const color = cssVar(`--series-${(i % 8) + 1}`);
-    const byDay = new Map(s.rows.filter((r) => `${r.origin} → ${r.destination}` === route)
-      .map((r) => [r.checked_on, Number(r.price)]));
+    const values = new Array(slots.length).fill(null);
+    const meta = new Array(slots.length).fill(null);
+    for (const p of all.filter((r) => `${r.origin} → ${r.destination}` === route)) {
+      const idx = slotIndex.get(sortKey(p));
+      if (values[idx] === null || Number(p.price) < values[idx]) {
+        values[idx] = Number(p.price);
+        meta[idx] = p;
+      }
+    }
     return {
       label: route,
-      data: days.map((d) => byDay.get(d) ?? null),
+      data: values,
+      meta,
       borderColor: color,
       backgroundColor: color,
       borderWidth: 2,
-      pointRadius: days.length > 30 ? 0 : 3,
+      pointRadius: slots.length > 45 ? 0 : 3,
       pointHoverRadius: 5,
       pointBorderColor: cssVar("--surface"),
       pointBorderWidth: 1.5,
@@ -261,9 +330,10 @@ function renderChart(card, watch) {
   charts.get(watch.id)?.destroy();
   const text2 = cssVar("--text-2");
   const grid = cssVar("--grid");
+  const labels = slots.map((s) => s.at ? checkLabelFmt.format(new Date(s.at)) : dayLabelFmt.format(new Date(s.day)));
   charts.set(watch.id, new Chart(canvas, {
     type: "line",
-    data: { labels: days.map(fmtShort), datasets },
+    data: { labels, datasets },
     options: {
       maintainAspectRatio: false,
       interaction: { mode: "index", intersect: false },
@@ -275,10 +345,27 @@ function renderChart(card, watch) {
           labels: { color: text2, boxWidth: 12, boxHeight: 2, usePointStyle: false },
         },
         tooltip: {
+          padding: 10,
           callbacks: {
-            label: (ctx) => ctx.parsed.y == null ? null
-              : ` ${ctx.dataset.label}: ${money(ctx.parsed.y, watch.currency)}`
-                + (payingSeats(watch) > 1 ? ` (~${money(ctx.parsed.y * payingSeats(watch), watch.currency)} total)` : ""),
+            title: (items) => {
+              const s = slots[items[0].dataIndex];
+              return s.at
+                ? `Check on ${checkTitleFmt.format(new Date(s.at))} (Warsaw time)`
+                : `${dayTitleFmt.format(new Date(s.day))} (daily summary, time not recorded)`;
+            },
+            label: (ctx) => {
+              if (ctx.parsed.y == null) return null;
+              const p = ctx.dataset.meta[ctx.dataIndex];
+              const total = groupTotal(p, watch);
+              return ` ${ctx.dataset.label}: ${money(ctx.parsed.y, watch.currency)} / person`
+                + (seats > 1 ? ` · ${total.exact ? "" : "~"}${money(total.amount, watch.currency)} for ${seats}` : "");
+            },
+            afterLabel: (ctx) => {
+              const p = ctx.dataset.meta[ctx.dataIndex];
+              if (!p) return "";
+              return `   ${fmtShort(p.depart_date)} – ${fmtShort(p.return_date)}${p.airline ? ` · ${p.airline}` : ""}`
+                + ` · ${sourceLabel(p.source)}${p.price_level ? ` (prices ${p.price_level})` : ""}`;
+            },
           },
         },
       },

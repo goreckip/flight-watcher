@@ -52,6 +52,44 @@ const daily = [
   ...series(2, "GDN", "MAD", 700, 5, 12),
 ].sort((a, b) => a.checked_on.localeCompare(b.checked_on));
 
+// Per-check points (3 a day) for the last 10 days of the Athens watch.
+const points = (() => {
+  const rand = rng(99);
+  const list = [];
+  let price = 1010;
+  for (let d = 9; d >= 0; d--) {
+    for (const [h, m] of [[5, 17], [12, 5], [18, 5]]) {
+      const at = new Date(Date.now() - d * 86_400_000);
+      at.setUTCHours(h, m, 0, 0);
+      if (at > new Date()) continue;
+      price = Math.round(Math.max(820, price + (rand() - 0.55) * 30 - (h === 18 ? 8 : 0)));
+      list.push({
+        watch_id: 1, checked_at: at.toISOString(), origin: "GDN", destination: "ATH",
+        price, price_total: price * 5, price_level: price < 930 ? "low" : "typical",
+        depart_date: "2027-02-02", return_date: "2027-02-08", airline: "KLM", source: "google",
+      });
+    }
+  }
+  return list;
+})();
+
+const timing = {
+  1: {
+    itineraries: 9, observations: 84, reliable: true,
+    bySlot: [
+      { key: "morning", avgDeviationPct: 0.9, observations: 28 },
+      { key: "afternoon", avgDeviationPct: 0.4, observations: 29 },
+      { key: "evening", avgDeviationPct: -1.3, observations: 27 },
+    ],
+    byWeekday: [
+      { key: "Mon", avgDeviationPct: 0.6, observations: 12 }, { key: "Tue", avgDeviationPct: -1.9, observations: 12 },
+      { key: "Wed", avgDeviationPct: -0.7, observations: 12 }, { key: "Thu", avgDeviationPct: 0.2, observations: 12 },
+      { key: "Fri", avgDeviationPct: 1.1, observations: 12 }, { key: "Sat", avgDeviationPct: 0.8, observations: 12 },
+      { key: "Sun", avgDeviationPct: -0.1, observations: 12 },
+    ],
+  },
+};
+
 const alerts = [
   {
     id: 1, watch_id: 1, origin: "GDN", destination: "ATH", depart_date: "2027-02-01",
@@ -96,7 +134,7 @@ function trips(watchId) {
 export async function demoApi(method, path) {
   if (method === "GET" && path === "/overview") {
     return {
-      watches, daily, alerts,
+      watches, daily, alerts, points, timing,
       google: {
         enabled: true, freshDays: 12, searchesToday: 3, dailyLimit: 3,
         account: { searchesLeft: 64, usedThisMonth: 36 }, coverage: { 1: { checked: 27, total: 33 } },

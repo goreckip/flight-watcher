@@ -26,6 +26,7 @@ import { googleSearchReport, serpApiAccount } from "../_shared/serpapi.ts";
 import { sendEmail } from "../_shared/resend.ts";
 import { alertHtml, alertSubject, type PriceAlert } from "../check-prices/email.ts";
 import { GOOGLE_FRESH_DAYS, googleCoverage, latestFares, toWatch } from "../_shared/queries.ts";
+import { type Observation, type TimingInsight, timingInsight } from "../_shared/timing.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -131,7 +132,7 @@ Deno.serve(async (req) => {
 async function overview(db: SupabaseClient) {
   const today = new Date().toISOString().slice(0, 10);
   const since = addDays(today, -HISTORY_DAYS);
-  const [watches, daily, alerts, account, runs, googleToday] = await Promise.all([
+  const [watches, daily, alerts, account, runs, googleToday, points, timing] = await Promise.all([
     db.from("watches").select("*").order("created_at"),
     db.from("route_daily_best")
       .select("watch_id, origin, destination, checked_on, price, price_total, price_level, currency, depart_date, return_date, airline, source")
@@ -142,8 +143,13 @@ async function overview(db: SupabaseClient) {
     db.from("check_runs").select("*").order("started_at", { ascending: false }).limit(10),
     db.from("search_log").select("id", { count: "exact", head: true })
       .eq("source", "google").eq("checked_on", today),
+    db.from("check_points")
+      .select("watch_id, checked_at, origin, destination, price, price_total, price_level, depart_date, return_date, airline, source")
+      .gte("checked_at", `${since}T00:00:00Z`)
+      .order("checked_at"),
+    timingByWatch(db),
   ]);
-  for (const result of [watches, daily, alerts, runs, googleToday]) if (result.error) throw result.error;
+  for (const result of [watches, daily, alerts, runs, googleToday, points]) if (result.error) throw result.error;
   const coverage = await googleCoverage(db, (watches.data ?? []).map(toWatch));
 
   return {
@@ -151,6 +157,8 @@ async function overview(db: SupabaseClient) {
     daily: daily.data,
     alerts: alerts.data,
     runs: runs.data,
+    points: points.data,
+    timing,
     google: {
       enabled: Boolean(Deno.env.get("SERPAPI_KEY")),
       account,
@@ -163,6 +171,26 @@ async function overview(db: SupabaseClient) {
 }
 
 const latestTrips = (db: SupabaseClient, watchId: number) => latestFares(db, watchId, 30);
+
+/** "When are prices lowest?" per watch, from the last 60 days of observations. */
+async function timingByWatch(db: SupabaseClient): Promise<Record<number, TimingInsight>> {
+  const since = new Date(Date.now() - 60 * 86_400_000).toISOString();
+  const rows: (Observation & { watch_id: number })[] = [];
+  const PAGE = 1000; // PostgREST returns at most 1000 rows per request
+  for (let from = 0; from < 100_000; from += PAGE) {
+    const { data, error } = await db.from("price_observations")
+      .select("watch_id, source, origin, destination, depart_date, return_date, price, observed_at")
+      .gte("observed_at", since)
+      .order("id")
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    rows.push(...(data ?? []));
+    if (!data || data.length < PAGE) break;
+  }
+  const byWatch = new Map<number, Observation[]>();
+  for (const r of rows) byWatch.set(r.watch_id, [...(byWatch.get(r.watch_id) ?? []), r]);
+  return Object.fromEntries([...byWatch].map(([id, list]) => [id, timingInsight(list)]));
+}
 
 /**
  * Run the watch's searches live (nothing is saved) and report, per search:

@@ -131,7 +131,7 @@ Deno.serve(async (req) => {
 async function overview(db: SupabaseClient) {
   const today = new Date().toISOString().slice(0, 10);
   const since = addDays(today, -HISTORY_DAYS);
-  const [watches, daily, alerts, account] = await Promise.all([
+  const [watches, daily, alerts, account, runs, googleToday] = await Promise.all([
     db.from("watches").select("*").order("created_at"),
     db.from("route_daily_best")
       .select("watch_id, origin, destination, checked_on, price, price_total, price_level, currency, depart_date, return_date, airline, source")
@@ -139,15 +139,26 @@ async function overview(db: SupabaseClient) {
       .order("checked_on"),
     db.from("alerts").select("*").order("sent_at", { ascending: false }).limit(20),
     serpApiAccount().catch(() => null),
+    db.from("check_runs").select("*").order("started_at", { ascending: false }).limit(10),
+    db.from("search_log").select("id", { count: "exact", head: true })
+      .eq("source", "google").eq("checked_on", today),
   ]);
-  for (const result of [watches, daily, alerts]) if (result.error) throw result.error;
+  for (const result of [watches, daily, alerts, runs, googleToday]) if (result.error) throw result.error;
   const coverage = await googleCoverage(db, (watches.data ?? []).map(toWatch));
 
   return {
     watches: watches.data,
     daily: daily.data,
     alerts: alerts.data,
-    google: { enabled: Boolean(Deno.env.get("SERPAPI_KEY")), account, coverage, freshDays: GOOGLE_FRESH_DAYS },
+    runs: runs.data,
+    google: {
+      enabled: Boolean(Deno.env.get("SERPAPI_KEY")),
+      account,
+      coverage,
+      freshDays: GOOGLE_FRESH_DAYS,
+      searchesToday: googleToday.count ?? 0,
+      dailyLimit: Number(Deno.env.get("SERPAPI_DAILY_SEARCHES") ?? 3),
+    },
   };
 }
 
@@ -290,7 +301,7 @@ const runCheck = () => callInternal("check-prices");
 async function callInternal(fn: "check-prices" | "weekly-digest"): Promise<Response> {
   const res = await fetch(`${env("SUPABASE_URL")}/functions/v1/${fn}`, {
     method: "POST",
-    headers: { "x-cron-secret": env("CRON_SECRET") },
+    headers: { "x-cron-secret": env("CRON_SECRET"), "x-trigger": "manual" },
   });
   const body = await res.json().catch(() => ({ error: `${fn} HTTP ${res.status}` }));
   return json(body, res.status);

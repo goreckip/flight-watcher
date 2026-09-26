@@ -2,7 +2,11 @@ name: Check prices
 
 on:
   schedule:
-    - cron: "0 5 * * *" # 05:00 UTC daily = 07:00 Warsaw (summer) / 06:00 (winter)
+    # Off the hour: GitHub delays (and sometimes drops) scheduled runs at :00 when load peaks.
+    - cron: "17 5 * * *" # 07:17 Warsaw (summer) / 06:17 (winter)
+    # Backup in case the first run is dropped. If the first run happened, this costs no Google
+    # searches (the daily budget is used) and only refreshes the free Aviasales data.
+    - cron: "43 9 * * *"
   workflow_dispatch:
 
 jobs:
@@ -17,6 +21,7 @@ jobs:
         run: |
           curl --fail-with-body -sS -X POST \
             -H "x-cron-secret: $CRON_SECRET" \
+            -H "x-trigger: schedule" \
             --max-time 150 \
             -o result.json \
             https://uorpnghoagbnwrdyrgre.supabase.co/functions/v1/check-prices \

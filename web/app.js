@@ -357,10 +357,10 @@ function renderStatus() {
   if (g.enabled) {
     const left = Math.max(0, (g.dailyLimit ?? 3) - (g.searchesToday ?? 0));
     lines.push(`<b>Google today:</b> ${g.searchesToday ?? 0} of ${g.dailyLimit ?? 3} searches used`
-      + (left ? `, ${left} left for “Check prices now”` : ", more tomorrow")
+      + (left ? ` (${left} left: each check, scheduled or “Check prices now”, uses 1)` : ", more tomorrow")
       + (g.account?.searchesLeft != null ? ` · ${g.account.searchesLeft} left this month` : ""));
   }
-  lines.push(`<b>Schedule:</b> automatic check every day around 07:15 (Warsaw time) · weekly summary Sundays 18:00`);
+  lines.push(`<b>Schedule:</b> automatic checks daily at 07:17, 14:05 and 20:05 (Warsaw time), 1 Google search each · weekly summary Sundays 18:03`);
 
   el.innerHTML = lines.map((l) => `<p>${l}</p>`).join("");
   el.hidden = false;

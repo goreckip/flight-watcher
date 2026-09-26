@@ -45,7 +45,7 @@ All tables have row-level security on with no public policies: only the Edge Fun
 ## Two price sources
 
 - **Travelpayouts (Aviasales cache):** free and broad, but it only knows dates people searched recently, so trips months ahead often have no data yet. Fares are per adult.
-- **Google Flights via SerpApi:** live prices for exact date pairs, priced for the whole group, with Google's low/typical/high verdict. The free plan allows 100 searches a month, so the job makes **3 searches a day** (`SERPAPI_DAILY_SEARCHES`): it re-checks the cheapest known date pair, then works through the others, least recently checked first. Every search is recorded in `search_log`, and a Google price counts as current for 12 days.
+- **Google Flights via SerpApi:** live prices for exact date pairs, priced for the whole group, with Google's low/typical/high verdict. The free plan allows 100 searches a month, so it makes **3 searches a day** (`SERPAPI_DAILY_SEARCHES`), 1 per scheduled check (`SERPAPI_SEARCHES_PER_RUN`): it re-checks the cheapest known date pair, then works through the others, least recently checked first. Every search is recorded in `search_log`, and a Google price counts as current for 12 days.
 
 ## How alerts work
 
@@ -74,7 +74,7 @@ tests/                        unit tests for logic.ts (npm test)
 scripts/serve.mjs             local static server for web/ (npm run dev)
 .github/workflows/
   deploy.yml                  test → type-check → migrate DB → sync secrets → deploy functions
-  check-prices.yml            daily trigger (05:00 UTC) + manual "Run workflow"
+  check-prices.yml            checks at 07:17, 14:05, 20:05 Warsaw time (CET/CEST-aware) + manual run
   pages.yml                   publish web/ to GitHub Pages
   weekly-digest.yml           Sunday 18:00 Warsaw weekly summary email (+ manual run)
 ```
@@ -118,5 +118,5 @@ npm run dev       # serve web/ at http://localhost:5173 (add ?demo for sample da
 
 1. ~~MVP: tables, check-prices function, email alerts~~
 2. ~~Web dashboard with price charts~~
-3. ~~Weekly summary email (Sundays 18:00 Warsaw time)~~
+3. ~~Weekly summary email (Sundays ~18:03 Warsaw time)~~
 4. Natural-language watch creation (LLM): "Japan in spring for 2+ weeks from Gdansk, Warsaw or Berlin"

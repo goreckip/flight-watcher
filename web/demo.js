@@ -66,7 +66,8 @@ const points = (() => {
       list.push({
         watch_id: 1, checked_at: at.toISOString(), origin: "GDN", destination: "ATH",
         price, price_total: price * 5, price_level: price < 930 ? "low" : "typical",
-        depart_date: "2027-02-02", return_date: "2027-02-08", airline: "KLM", source: "google",
+        depart_date: "2027-02-02", return_date: "2027-02-08",
+        airline: ["KLM", "LOT", "KLM", "Aegean", "LOT", "KLM"][Math.floor(rand() * 6)], source: "google",
       });
     }
   }

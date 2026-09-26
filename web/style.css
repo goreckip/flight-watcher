@@ -167,6 +167,17 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
 .check { display: flex; gap: 6px; align-items: center; font-size: 13px; color: var(--text-2); }
 .check input { width: auto; }
 
+.airline-legend { margin-top: 10px; display: grid; gap: 8px; }
+.legend-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; font-size: 13px; }
+.legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.swatch { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg button {
+  font: inherit; font-size: 12px; padding: 3px 10px; border: 0; cursor: pointer;
+  background: var(--surface); color: var(--text-2);
+}
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+
 .timing { margin-top: 14px; padding: 12px 14px; border-radius: 10px; background: var(--surface-2); font-size: 14px; }
 .timing p { margin: 0 0 6px; }
 .timing p:last-child { margin-bottom: 0; }

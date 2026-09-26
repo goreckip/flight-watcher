@@ -168,7 +168,7 @@ function statTiles(watch, s) {
     ${changeTile}
     <div class="stat"><span class="stat-label">Best dates</span>
       <span class="stat-value">${fmtShort(s.best.depart_date)} – ${fmtShort(s.best.return_date)}</span>
-      <span class="stat-sub">${esc(s.best.origin)} → ${esc(s.best.destination)} · ${nightsBetween(s.best.depart_date, s.best.return_date)} nights${s.best.airline ? ` · ${esc(s.best.airline)}` : ""} · ${sourceLabel(s.best.source)}</span></div>
+      <span class="stat-sub">${esc(s.best.origin)} → ${esc(s.best.destination)} · ${nightsBetween(s.best.depart_date, s.best.return_date)} nights${s.best.airline ? ` · ${esc(airlineName(s.best.airline))}` : ""} · ${sourceLabel(s.best.source)}</span></div>
   </div>`;
 }
 
@@ -239,6 +239,7 @@ function watchCard(watch) {
     ? `${statTiles(watch, s)}
        <p class="chart-title">Best fare per person at each check · hover a point for the check time and details</p>
        <div class="chart-wrap"><canvas aria-label="Price history chart for ${esc(watch.name)}" role="img"></canvas></div>
+       <div class="airline-legend"></div>
        ${timingBlock(watch)}
        <details class="trips"><summary>Latest known fares</summary><div class="trips-body"><p class="muted small">Loading…</p></div></details>`
     : `<div class="empty">No fares recorded yet. They appear after the next daily check, or click <b>Check prices now</b>.</div>`;
@@ -300,8 +301,14 @@ function renderChart(card, watch) {
     .concat(routes.filter((r) => !watch.destinations.some((d) => r.endsWith(d))));
 
   const seats = payingSeats(watch);
+  const byAirline = colorMode(watch) === "airline";
+  const airlineColor = airlineColors(watch, all);
+  const neutral = cssVar("--text-3");
+  const surface = cssVar("--surface");
+  const DASHES = [[], [6, 4], [2, 3], [10, 3, 2, 3]]; // routes stay distinguishable in airline mode
+
   const datasets = ordered.map((route, i) => {
-    const color = cssVar(`--series-${(i % 8) + 1}`);
+    const routeColor = cssVar(`--series-${(i % 8) + 1}`);
     const values = new Array(slots.length).fill(null);
     const meta = new Array(slots.length).fill(null);
     for (const p of all.filter((r) => `${r.origin} → ${r.destination}` === route)) {
@@ -311,17 +318,21 @@ function renderChart(card, watch) {
         meta[idx] = p;
       }
     }
+    const pointColors = meta.map((p) => (p ? airlineColor.get(airlineName(p.airline)) : neutral));
     return {
       label: route,
       data: values,
       meta,
-      borderColor: color,
-      backgroundColor: color,
+      borderColor: byAirline ? neutral : routeColor,
+      backgroundColor: byAirline ? neutral : routeColor,
+      borderDash: byAirline ? DASHES[i % DASHES.length] : [],
       borderWidth: 2,
-      pointRadius: slots.length > 45 ? 0 : 3,
-      pointHoverRadius: 5,
-      pointBorderColor: cssVar("--surface"),
-      pointBorderWidth: 1.5,
+      // Airline mode: every point shows, filled with the airline's color, with a surface ring.
+      pointRadius: byAirline ? 4.5 : slots.length > 45 ? 0 : 3,
+      pointHoverRadius: byAirline ? 6.5 : 5,
+      pointBackgroundColor: byAirline ? pointColors : routeColor,
+      pointBorderColor: surface,
+      pointBorderWidth: 2,
       spanGaps: true,
       tension: 0.25,
     };
@@ -347,6 +358,11 @@ function renderChart(card, watch) {
         tooltip: {
           padding: 10,
           callbacks: {
+            labelColor: (ctx) => {
+              const p = ctx.dataset.meta[ctx.dataIndex];
+              const c = byAirline && p ? airlineColor.get(airlineName(p.airline)) : ctx.dataset.borderColor;
+              return { borderColor: c, backgroundColor: c };
+            },
             title: (items) => {
               const s = slots[items[0].dataIndex];
               return s.at
@@ -363,7 +379,7 @@ function renderChart(card, watch) {
             afterLabel: (ctx) => {
               const p = ctx.dataset.meta[ctx.dataIndex];
               if (!p) return "";
-              return `   ${fmtShort(p.depart_date)} – ${fmtShort(p.return_date)}${p.airline ? ` · ${p.airline}` : ""}`
+              return `   ${fmtShort(p.depart_date)} – ${fmtShort(p.return_date)} · ${airlineName(p.airline)}`
                 + ` · ${sourceLabel(p.source)}${p.price_level ? ` (prices ${p.price_level})` : ""}`;
             },
           },
@@ -379,6 +395,87 @@ function renderChart(card, watch) {
         },
       },
     },
+  }));
+
+  renderAirlineLegend(card, watch, datasets, airlineColor, byAirline);
+}
+
+// ---------- airline colors ----------
+
+// Aviasales reports IATA codes, Google reports names: map codes so one airline gets one color.
+const AIRLINE_CODES = {
+  LO: "LOT", KL: "KLM", SK: "SAS", A3: "Aegean", FR: "Ryanair", W6: "Wizz Air", W4: "Wizz Air",
+  LH: "Lufthansa", OS: "Austrian", LX: "Swiss", SN: "Brussels Airlines", AF: "Air France",
+  U2: "easyJet", EW: "Eurowings", DY: "Norwegian", D8: "Norwegian", TK: "Turkish Airlines",
+  BA: "British Airways", IB: "Iberia", VY: "Vueling", AZ: "ITA Airways", TP: "TAP Air Portugal",
+  OA: "Olympic Air", LY: "El Al", EK: "Emirates", QR: "Qatar Airways", AY: "Finnair", BT: "airBaltic",
+};
+
+function airlineName(raw) {
+  if (!raw) return "Unknown";
+  return String(raw).split(/\s*\+\s*/).map((a) => AIRLINE_CODES[a.trim()] ?? a.trim()).join(" + ");
+}
+
+/**
+ * Airline → color. Slots are handed out in order of first appearance over time, so an airline
+ * keeps its color as new ones show up (color follows the entity, never its rank). Past the
+ * eight palette slots, airlines share the neutral "other" color.
+ */
+function airlineColors(watch, points) {
+  const order = [];
+  for (const p of [...points].sort((a, b) => (a.at ?? a.day).localeCompare(b.at ?? b.day))) {
+    const name = airlineName(p.airline);
+    if (!order.includes(name)) order.push(name);
+  }
+  return new Map(order.map((name, i) => [name, i < 8 ? cssVar(`--series-${i + 1}`) : cssVar("--text-3")]));
+}
+
+const COLOR_MODE_KEY = "flight-watcher-color-mode";
+function colorMode(watch) {
+  try { return JSON.parse(localStorage.getItem(COLOR_MODE_KEY) ?? "{}")[watch.id] ?? "airline"; } catch { return "airline"; }
+}
+function setColorMode(watch, mode) {
+  try {
+    const all = JSON.parse(localStorage.getItem(COLOR_MODE_KEY) ?? "{}");
+    all[watch.id] = mode;
+    localStorage.setItem(COLOR_MODE_KEY, JSON.stringify(all));
+  } catch { /* private mode: falls back to the default */ }
+}
+
+/** Legend under the chart: each airline's color and how often it had the lowest fare. */
+function renderAirlineLegend(card, watch, datasets, airlineColor, byAirline) {
+  const el = $(".airline-legend", card);
+  if (!el) return;
+  const toggle = `<span class="seg" role="group" aria-label="Color points by">
+      <button type="button" data-mode="airline" aria-pressed="${byAirline}">Airline</button>
+      <button type="button" data-mode="route" aria-pressed="${!byAirline}">Route</button>
+    </span>`;
+
+  // Which airline had the lowest fare at each check (across routes)?
+  const wins = new Map();
+  let checks = 0;
+  const n = datasets[0]?.data.length ?? 0;
+  for (let i = 0; i < n; i++) {
+    let best = null;
+    for (const ds of datasets) {
+      const p = ds.meta[i];
+      if (p && (!best || Number(p.price) < Number(best.price))) best = p;
+    }
+    if (!best) continue;
+    checks++;
+    const name = airlineName(best.airline);
+    wins.set(name, (wins.get(name) ?? 0) + 1);
+  }
+
+  const items = [...airlineColor.keys()].map((name) => `<span class="legend-item">
+      <span class="swatch" style="background:${airlineColor.get(name)}"></span>${esc(name)}
+      <span class="muted">lowest at ${wins.get(name) ?? 0} of ${checks} check${checks === 1 ? "" : "s"}</span></span>`).join("");
+
+  el.innerHTML = `<div class="legend-row"><span class="muted small">Color points by</span> ${toggle}</div>
+    ${byAirline ? `<div class="legend-row">${items}</div>` : ""}`;
+  el.querySelectorAll("[data-mode]").forEach((b) => b.addEventListener("click", () => {
+    setColorMode(watch, b.dataset.mode);
+    renderChart(card, watch);
   }));
 }
 
@@ -474,7 +571,7 @@ async function loadTrips(card, watch) {
           <td>${esc(t.origin)} → ${esc(t.destination)}</td>
           <td>${fmtShort(t.depart_date)} – ${fmtShort(t.return_date)}</td>
           <td class="num">${nightsBetween(t.depart_date, t.return_date)}</td>
-          <td>${esc(t.airline ?? "")}</td>
+          <td>${t.airline ? esc(airlineName(t.airline)) : ""}</td>
           <td>${t.transfers ? `≤ ${t.transfers}` : "Direct"}</td>
           <td>${hours(t.duration_to)}</td>
           <td class="num"><b>${money(t.price, t.currency)}</b></td>

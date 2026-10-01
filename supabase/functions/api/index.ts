@@ -26,7 +26,7 @@ import { googleSearchReport, serpApiAccount } from "../_shared/serpapi.ts";
 import { sendEmail } from "../_shared/resend.ts";
 import { alertHtml, alertSubject, type PriceAlert } from "../check-prices/email.ts";
 import { GOOGLE_FRESH_DAYS, googleCoverage, latestFares, toWatch } from "../_shared/queries.ts";
-import { type Observation, type TimingInsight, timingInsight } from "../_shared/timing.ts";
+import { DEFAULT_TIMEZONE, type Observation, type TimingInsight, timingInsight } from "../_shared/timing.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -189,7 +189,8 @@ async function timingByWatch(db: SupabaseClient): Promise<Record<number, TimingI
   }
   const byWatch = new Map<number, Observation[]>();
   for (const r of rows) byWatch.set(r.watch_id, [...(byWatch.get(r.watch_id) ?? []), r]);
-  return Object.fromEntries([...byWatch].map(([id, list]) => [id, timingInsight(list)]));
+  const tz = Deno.env.get("TIMEZONE") || DEFAULT_TIMEZONE;
+  return Object.fromEntries([...byWatch].map(([id, list]) => [id, timingInsight(list, tz)]));
 }
 
 /**

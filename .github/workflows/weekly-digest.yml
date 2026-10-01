@@ -1,6 +1,6 @@
 name: Weekly summary (manual)
 
-# The Sunday 18:03 (Warsaw) schedule runs inside Supabase with pg_cron; see
+# The Sunday 18:03 (your TIMEZONE) schedule runs inside Supabase with pg_cron; see
 # supabase/migrations/*_db_scheduler.sql. This workflow sends the summary on demand.
 on:
   workflow_dispatch:
@@ -12,6 +12,7 @@ jobs:
       - name: Send weekly summary
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
         # Logs are public: print only whether it was sent.
         run: |
           curl --fail-with-body -sS -X POST \
@@ -19,7 +20,7 @@ jobs:
             -H "x-trigger: manual" \
             --max-time 120 \
             -o result.json \
-            https://uorpnghoagbnwrdyrgre.supabase.co/functions/v1/weekly-digest \
+            "https://$PROJECT_REF.supabase.co/functions/v1/weekly-digest" \
             || { echo "weekly-digest failed (details in Supabase → Edge Functions → Logs)"; exit 1; }
           summary=$(jq -r '"Sent: \(.sent) · watches: \(.watches)"' result.json)
           echo "$summary"

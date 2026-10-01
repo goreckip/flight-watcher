@@ -24,7 +24,7 @@ function escapeHtml(s: string): string {
 }
 
 function money(amount: number, currency: string): string {
-  return `${Math.round(amount).toLocaleString("pl-PL")} ${currency}`;
+  return `${Math.round(amount).toLocaleString("en-GB")} ${currency}`;
 }
 
 function hours(minutes: number | null): string {

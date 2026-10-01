@@ -1,6 +1,11 @@
 import { demoApi } from "./demo.js?v=__VERSION__";
 
-const API_URL = "https://uorpnghoagbnwrdyrgre.supabase.co/functions/v1/api";
+import { CONFIG } from "./config.js?v=__VERSION__";
+
+const API_URL = CONFIG.apiUrl;
+// Times are shown in the owner's time zone (repository variable TIMEZONE), matching the schedule.
+const TZ = CONFIG.timezone || "Europe/Warsaw";
+const TZ_LABEL = TZ.split("/").pop().replace(/_/g, " "); // "Europe/Warsaw" → "Warsaw"
 const DEMO = new URLSearchParams(location.search).has("demo");
 const PASSWORD_KEY = "flight-watcher-password";
 const BASELINE_DAYS = 14;
@@ -261,7 +266,7 @@ function lowestChecksTable(watch) {
         <th>Source</th><th>vs now</th></tr></thead>
       <tbody>${body}</tbody>
     </table></div>
-    <p class="muted small">Each row is one fare. If the same flight and price was the best at several checks in a row, it appears once with when it was first and last seen. Times are Warsaw time.</p>
+    <p class="muted small">Each row is one fare. If the same flight and price was the best at several checks in a row, it appears once with when it was first and last seen. Times are ${esc(TZ_LABEL)} time.</p>
   </section>`;
 }
 
@@ -294,7 +299,7 @@ function timingBlock(watch) {
     <p><b>When are prices lowest?</b> ${headline}</p>
     <p class="tchips">${t.bySlot.map((b) => cell(b, SLOT_LABELS[b.key])).join("")}</p>
     ${t.byWeekday.length ? `<p class="tchips">${t.byWeekday.map((b) => cell(b, b.key)).join("")}</p>` : ""}
-    <p class="muted small">Average price vs the same flight's own average, by check time and weekday (Warsaw time). Negative means cheaper. Number of observations in brackets.</p>
+    <p class="muted small">Average price vs the same flight's own average, by check time and weekday (${esc(TZ_LABEL)} time). Negative means cheaper. Number of observations in brackets.</p>
   </div>`;
 }
 
@@ -349,10 +354,8 @@ function watchCard(watch) {
   </article>`;
 }
 
-// Check times are shown in Warsaw time, matching the schedule.
-const WARSAW = "Europe/Warsaw";
-const checkLabelFmt = new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: WARSAW });
-const checkTitleFmt = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit", timeZone: WARSAW });
+const checkLabelFmt = new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: TZ });
+const checkTitleFmt = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit", timeZone: TZ });
 const dayLabelFmt = new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
 const dayTitleFmt = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" });
 
@@ -452,7 +455,7 @@ function renderChart(card, watch) {
             title: (items) => {
               const s = slots[items[0].dataIndex];
               return s.at
-                ? `Check on ${checkTitleFmt.format(new Date(s.at))} (Warsaw time)`
+                ? `Check on ${checkTitleFmt.format(new Date(s.at))} (${TZ_LABEL} time)`
                 : `${dayTitleFmt.format(new Date(s.day))} (daily summary, time not recorded)`;
             },
             label: (ctx) => {
@@ -630,7 +633,7 @@ function renderStatus() {
       + (left ? ` (${left} left: each check, scheduled or “Check prices now”, uses 1)` : ", more tomorrow")
       + (g.account?.searchesLeft != null ? ` · ${g.account.searchesLeft} left this month` : ""));
   }
-  lines.push(`<b>Schedule:</b> automatic checks daily at 07:17, 14:05 and 20:05 (Warsaw time), 1 Google search each · weekly summary Sundays 18:03`);
+  lines.push(`<b>Schedule:</b> automatic checks daily at 07:17, 14:05 and 20:05 (${esc(TZ_LABEL)} time), 1 Google search each · weekly summary Sundays 18:03`);
 
   el.innerHTML = lines.map((l) => `<p>${l}</p>`).join("") + checkHistory();
   el.hidden = false;
@@ -667,7 +670,7 @@ function checkHistory() {
   }).join("");
   return `<details class="history"><summary>All checks (last ${runs.length})</summary>
     <div class="table-wrap"><table>
-      <thead><tr><th>When (Warsaw)</th><th>Type</th><th class="num">Google searches</th><th class="num">Fares</th>
+      <thead><tr><th>When (${esc(TZ_LABEL)})</th><th>Type</th><th class="num">Google searches</th><th class="num">Fares</th>
         <th class="num">Best / person</th><th>Best fare</th><th class="num">Alerts</th><th>Status</th></tr></thead>
       <tbody>${rows}</tbody>
     </table></div></details>`;
@@ -1042,6 +1045,14 @@ if (DEMO) {
   $("#demo-banner").hidden = false;
   $("#btn-logout").hidden = true;
   start();
+} else if (!API_URL) {
+  // A fresh copy of the project that hasn't been connected to its Supabase project yet.
+  showLogin();
+  $("#login-form").hidden = true;
+  const err = $("#login-error");
+  err.innerHTML = `This dashboard isn't connected yet. Set the repository variable <code>SUPABASE_PROJECT_REF</code>
+    and run the <b>Website</b> workflow again (see SETUP.md).`;
+  err.hidden = false;
 } else if (password) {
   start();
 } else {

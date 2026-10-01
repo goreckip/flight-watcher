@@ -9,7 +9,7 @@ import { googleCoverage, latestFares, toWatch, today } from "../_shared/queries.
 import { serpApiAccount } from "../_shared/serpapi.ts";
 import { sendEmail } from "../_shared/resend.ts";
 
-const DASHBOARD_URL = Deno.env.get("DASHBOARD_URL") ?? "https://goreckip.github.io/flight-watcher/";
+const DASHBOARD_URL = Deno.env.get("DASHBOARD_URL") ?? "";
 
 function env(name: string): string {
   const value = Deno.env.get(name);

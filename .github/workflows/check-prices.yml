@@ -1,6 +1,6 @@
 name: Check prices (manual)
 
-# The schedule (07:17, 14:05, 20:05 Warsaw time) runs inside Supabase with pg_cron; see
+# The schedule (07:17, 14:05, 20:05 in your TIMEZONE) runs inside Supabase with pg_cron; see
 # supabase/migrations/*_db_scheduler.sql. GitHub's free scheduler started runs hours late.
 # This workflow remains as a manual backup: Actions → Check prices (manual) → Run workflow.
 on:
@@ -13,6 +13,7 @@ jobs:
       - name: Run check-prices
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
         # Logs are public on a public repo, so print only totals, not routes, dates or prices.
         run: |
           curl --fail-with-body -sS -X POST \
@@ -20,7 +21,7 @@ jobs:
             -H "x-trigger: manual" \
             --max-time 150 \
             -o result.json \
-            https://uorpnghoagbnwrdyrgre.supabase.co/functions/v1/check-prices \
+            "https://$PROJECT_REF.supabase.co/functions/v1/check-prices" \
             || { echo "check-prices failed (details in Supabase → Edge Functions → Logs)"; exit 1; }
           summary=$(jq -r '"Watches: \(.watches | length) · fares found: \([.watches[].fares] | add // 0) · alerts sent: \(.alertsSent) · search errors: \(.errors | length)"' result.json)
           echo "$summary"

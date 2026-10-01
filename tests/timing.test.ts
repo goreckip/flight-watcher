@@ -17,6 +17,12 @@ test("slots and weekdays use Warsaw time", () => {
   assert.equal(weekdayOf("2026-09-26T23:30:00Z"), "Sun");
 });
 
+test("other time zones can be configured", () => {
+  // 18:05 UTC = 14:05 in New York (EDT); Saturday 23:30 UTC is still Saturday there
+  assert.equal(slotOf("2026-09-26T18:05:00Z", "America/New_York"), "afternoon");
+  assert.equal(weekdayOf("2026-09-26T23:30:00Z", "America/New_York"), "Sat");
+});
+
 test("deviation is measured against the same itinerary's own average", () => {
   const insight = timingInsight([
     // itinerary A: evening cheaper

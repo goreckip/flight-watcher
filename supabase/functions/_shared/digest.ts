@@ -95,7 +95,7 @@ export interface WatchDigest {
 
 const ESC: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, (c) => ESC[c]);
-const money = (n: number, cur: string) => `${Math.round(n).toLocaleString("pl-PL")} ${cur}`;
+const money = (n: number, cur: string) => `${Math.round(n).toLocaleString("en-GB")} ${cur}`;
 const dateFmt = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
 const short = (iso: string) => dateFmt.format(new Date(iso));
 const nights = (a: string, b: string) => Math.round((Date.parse(b) - Date.parse(a)) / 86_400_000);
@@ -186,7 +186,7 @@ export function digestHtml(items: WatchDigest[], opts: { dashboardUrl: string; s
   return `<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;font-size:14px;color:#111;max-width:680px">
   <p>Here's your weekly flight price summary.</p>
   ${items.length ? items.map(watchBlock).join("") : "<p>You have no active watches.</p>"}
-  <p style="margin-top:24px"><a href="${esc(opts.dashboardUrl)}">Open the dashboard</a></p>
+  ${opts.dashboardUrl ? `<p style="margin-top:24px"><a href="${esc(opts.dashboardUrl)}">Open the dashboard</a></p>` : ""}
   <p style="color:#777;font-size:12px">${opts.searchesLeft != null ? `Google Flights searches left this month: ${opts.searchesLeft}. ` : ""}Totals marked ~ are estimates (per-adult fare × seats). Prices change quickly, so check before booking.</p>
 </div>`;
 }

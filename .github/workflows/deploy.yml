@@ -1,13 +1,13 @@
 name: Test & deploy
 
+# Configuration lives in the repository settings (Settings → Secrets and variables → Actions):
+#   Variables: SUPABASE_PROJECT_REF (required), TIMEZONE, COUNTRY, DASHBOARD_URL (optional)
+#   Secrets:   see SETUP.md
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
-
-env:
-  PROJECT_REF: uorpnghoagbnwrdyrgre
 
 jobs:
   test:
@@ -26,26 +26,33 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     env:
+      PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      TRAVELPAYOUTS_TOKEN: ${{ secrets.TRAVELPAYOUTS_TOKEN }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+      APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
+      SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
+      TIMEZONE: ${{ vars.TIMEZONE || 'Europe/Warsaw' }}
+      COUNTRY: ${{ vars.COUNTRY || 'pl' }}
     steps:
-      - name: Check secrets are configured
-        env:
-          TRAVELPAYOUTS_TOKEN: ${{ secrets.TRAVELPAYOUTS_TOKEN }}
-          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-          ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
-          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
+      - name: Check configuration
         run: |
           missing=0
-          for name in SUPABASE_ACCESS_TOKEN SUPABASE_DB_PASSWORD TRAVELPAYOUTS_TOKEN RESEND_API_KEY ALERT_EMAIL_TO CRON_SECRET APP_PASSWORD SERPAPI_KEY; do
-            if [ -n "${!name}" ]; then echo "✔ $name"; else echo "::error::Missing repository secret: $name"; missing=1; fi
-          done
-          if [ "$missing" = 1 ]; then
-            echo "Add them under Settings → Secrets and variables → Actions → Repository secrets (exact uppercase names)."
-            exit 1
+          if [ -z "$PROJECT_REF" ]; then
+            echo "::error::Missing repository VARIABLE SUPABASE_PROJECT_REF (Settings → Secrets and variables → Actions → Variables tab). It's the id in your Supabase URL: https://<id>.supabase.co"
+            missing=1
+          else
+            echo "✔ SUPABASE_PROJECT_REF = $PROJECT_REF"
           fi
+          for name in SUPABASE_ACCESS_TOKEN SUPABASE_DB_PASSWORD TRAVELPAYOUTS_TOKEN RESEND_API_KEY ALERT_EMAIL_TO CRON_SECRET APP_PASSWORD; do
+            if [ -n "${!name}" ]; then echo "✔ $name"; else echo "::error::Missing repository SECRET: $name (see SETUP.md)"; missing=1; fi
+          done
+          if [ -n "$SERPAPI_KEY" ]; then echo "✔ SERPAPI_KEY"; else echo "::warning::No SERPAPI_KEY: Google Flights prices are off; only the Aviasales cache is used. See SETUP.md."; fi
+          echo "Time zone: $TIMEZONE · Google Flights market: $COUNTRY"
+          if [ "$missing" = 1 ]; then exit 1; fi
 
       - uses: actions/checkout@v4
 
@@ -60,21 +67,23 @@ jobs:
         run: supabase db push
 
       - name: Sync function secrets
-        env:
-          TRAVELPAYOUTS_TOKEN: ${{ secrets.TRAVELPAYOUTS_TOKEN }}
-          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-          ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
-          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
         run: |
-          supabase secrets set --project-ref "$PROJECT_REF" \
-            "TRAVELPAYOUTS_TOKEN=$TRAVELPAYOUTS_TOKEN" \
-            "RESEND_API_KEY=$RESEND_API_KEY" \
-            "ALERT_EMAIL_TO=$ALERT_EMAIL_TO" \
-            "CRON_SECRET=$CRON_SECRET" \
-            "APP_PASSWORD=$APP_PASSWORD" \
-            "SERPAPI_KEY=$SERPAPI_KEY"
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          repo="${GITHUB_REPOSITORY#*/}"
+          dashboard="${{ vars.DASHBOARD_URL }}"
+          [ -n "$dashboard" ] || dashboard="https://${owner}.github.io/${repo}/"
+          args=(
+            "TRAVELPAYOUTS_TOKEN=$TRAVELPAYOUTS_TOKEN"
+            "RESEND_API_KEY=$RESEND_API_KEY"
+            "ALERT_EMAIL_TO=$ALERT_EMAIL_TO"
+            "CRON_SECRET=$CRON_SECRET"
+            "APP_PASSWORD=$APP_PASSWORD"
+            "TIMEZONE=$TIMEZONE"
+            "COUNTRY=$COUNTRY"
+            "DASHBOARD_URL=$dashboard"
+          )
+          [ -n "$SERPAPI_KEY" ] && args+=("SERPAPI_KEY=$SERPAPI_KEY")
+          supabase secrets set --project-ref "$PROJECT_REF" "${args[@]}"
 
       - name: Deploy Edge Functions
         run: |
@@ -83,11 +92,9 @@ jobs:
           supabase functions deploy weekly-digest --project-ref "$PROJECT_REF" --no-verify-jwt
 
       - name: Configure the database scheduler
-        # pg_cron (see migrations) calls the functions on schedule; this stores the URL and
-        # shared secret it needs. Safe to repeat on every deploy.
-        env:
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        # pg_cron (see migrations) calls the functions on schedule; this stores the URL, shared
+        # secret and time zone it needs. Safe to repeat on every deploy.
         run: |
           curl --fail-with-body -sS -X POST -H "x-cron-secret: $CRON_SECRET" -H "x-setup: 1" \
             "https://$PROJECT_REF.supabase.co/functions/v1/check-prices" -o /dev/null
-          echo "Scheduler configured"
+          echo "Scheduler configured ($TIMEZONE)"

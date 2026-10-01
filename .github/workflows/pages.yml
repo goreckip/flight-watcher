@@ -23,6 +23,19 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - name: Write site configuration
+        # The dashboard learns where its API is from repository variables, so copies of this
+        # project need no code changes. Without SUPABASE_PROJECT_REF the site offers demo mode only.
+        env:
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+          TIMEZONE: ${{ vars.TIMEZONE || 'Europe/Warsaw' }}
+        run: |
+          api=""
+          [ -n "$PROJECT_REF" ] && api="https://$PROJECT_REF.supabase.co/functions/v1/api"
+          [ -n "$PROJECT_REF" ] || echo "::warning::Variable SUPABASE_PROJECT_REF is not set; the site will only offer demo mode."
+          printf 'export const CONFIG = %s;\n' \
+            "$(jq -n --arg api "$api" --arg tz "$TIMEZONE" '{apiUrl: $api, timezone: $tz}')" > web/config.js
+          cat web/config.js
       - name: Cache-bust asset URLs with the commit hash
         run: sed -i "s/__VERSION__/${GITHUB_SHA::7}/g" web/index.html web/app.js
       - uses: actions/configure-pages@v5

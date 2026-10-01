@@ -87,7 +87,7 @@ export async function googleSearchReport(
     type: "1",
     currency: watch.currency,
     hl: "en",
-    gl: "pl",
+    gl: (Deno.env.get("COUNTRY") ?? "pl").toLowerCase(), // Google Flights market (point of sale)
     adults: String(pax.adults),
     children: String(pax.children),
     infants_on_lap: String(pax.infants_on_lap),

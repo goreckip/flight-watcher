@@ -52,6 +52,7 @@ Deno.serve(async (req) => {
     const { error } = await db.from("app_config").upsert([
       { key: "cron_secret", value: secret, updated_at: new Date().toISOString() },
       { key: "functions_url", value: `${env("SUPABASE_URL")}/functions/v1`, updated_at: new Date().toISOString() },
+      { key: "timezone", value: Deno.env.get("TIMEZONE") || "Europe/Warsaw", updated_at: new Date().toISOString() },
     ]);
     if (error) return Response.json({ error: error.message }, { status: 500 });
     return Response.json({ ok: true });

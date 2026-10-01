@@ -1,4 +1,5 @@
 // Sample data for ?demo, so the dashboard can be shown without the password.
+// The trips are made up: a family Easter break in Lisbon and a couple's spring trip to Spain.
 
 function rng(seed) {
   return () => {
@@ -11,17 +12,19 @@ function isoDaysAgo(n) {
   return new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
 }
 
+const SEATS_LISBON = 4; // 2 adults + 2 children
+
 const watches = [
   {
-    id: 1, name: "Winter break trip", origins: ["KTW"], destinations: ["SKG"],
-    depart_from: "2027-01-29", depart_to: "2027-02-09", return_by: "2027-02-14",
-    stay_min: 5, stay_max: 7, max_transfers: 1, max_leg_minutes: 390,
-    adults: 2, child_ages: [4, 8, 11], drop_pct: 10, currency: "PLN", active: true,
+    id: 1, name: "Lisbon spring break", origins: ["WAW"], destinations: ["LIS"],
+    depart_from: "2027-03-27", depart_to: "2027-04-05", return_by: "2027-04-11",
+    stay_min: 6, stay_max: 9, max_transfers: 1, max_leg_minutes: 300,
+    adults: 2, child_ages: [6, 10], drop_pct: 10, currency: "PLN", active: true,
   },
   {
-    id: 2, name: "Spain in spring", origins: ["KTW"], destinations: ["BCN", "AGP", "MAD"],
-    depart_from: "2027-04-15", depart_to: "2027-06-07", return_by: "2027-06-15",
-    stay_min: 5, stay_max: 8, max_transfers: 0, max_leg_minutes: null,
+    id: 2, name: "Spain in May", origins: ["KRK"], destinations: ["BCN", "AGP", "VLC"],
+    depart_from: "2027-05-01", depart_to: "2027-05-24", return_by: "2027-05-31",
+    stay_min: 4, stay_max: 7, max_transfers: 0, max_leg_minutes: null,
     adults: 2, child_ages: [], drop_pct: 10, currency: "PLN", active: true,
   },
 ];
@@ -36,38 +39,41 @@ function series(watchId, origin, destination, base, seed, days = 24, google = fa
     rows.push({
       watch_id: watchId, origin, destination, checked_on: isoDaysAgo(d),
       price: Math.round(price), currency: "PLN",
-      price_total: google ? Math.round(price) * 5 : null,
+      price_total: google ? Math.round(price) * SEATS_LISBON : null,
       price_level: google ? (d === 0 ? "low" : "typical") : null,
       source: google ? "google" : "travelpayouts",
-      depart_date: "2027-02-01", return_date: "2027-02-07", airline: "LO",
+      depart_date: google ? "2027-03-29" : "2027-05-08",
+      return_date: google ? "2027-04-05" : "2027-05-13",
+      airline: google ? "TP" : "FR",
     });
   }
   return rows;
 }
 
 const daily = [
-  ...series(1, "KTW", "SKG", 980, 7, 24, true),
-  ...series(2, "KTW", "BCN", 520, 11),
-  ...series(2, "KTW", "AGP", 610, 23),
-  ...series(2, "KTW", "MAD", 700, 5, 12),
+  ...series(1, "WAW", "LIS", 1290, 7, 24, true),
+  ...series(2, "KRK", "BCN", 520, 11),
+  ...series(2, "KRK", "AGP", 610, 23),
+  ...series(2, "KRK", "VLC", 560, 5, 12),
 ].sort((a, b) => a.checked_on.localeCompare(b.checked_on));
 
-// Per-check points (3 a day) for the last 10 days of the Thessaloniki watch.
+// Per-check points (3 a day) for the last 10 days of the Lisbon watch.
 const points = (() => {
   const rand = rng(99);
   const list = [];
-  let price = 1010;
+  let price = 1320;
   for (let d = 9; d >= 0; d--) {
     for (const [h, m] of [[5, 17], [12, 5], [18, 5]]) {
       const at = new Date(Date.now() - d * 86_400_000);
       at.setUTCHours(h, m, 0, 0);
       if (at > new Date()) continue;
-      price = Math.round(Math.max(820, price + (rand() - 0.55) * 30 - (h === 18 ? 8 : 0)));
+      price = Math.round(Math.max(1080, price + (rand() - 0.55) * 40 - (h === 18 ? 10 : 0)));
       list.push({
-        run_id: list.length + 1, watch_id: 1, checked_at: at.toISOString(), origin: "KTW", destination: "SKG",
-        price, price_total: price * 5, price_level: price < 930 ? "low" : "typical",
-        depart_date: "2027-02-02", return_date: "2027-02-08",
-        airline: ["KLM", "LOT", "KLM", "Aegean", "LOT", "KLM"][Math.floor(rand() * 6)], source: "google",
+        run_id: list.length + 1, watch_id: 1, checked_at: at.toISOString(), origin: "WAW", destination: "LIS",
+        price, price_total: price * SEATS_LISBON, price_level: price < 1200 ? "low" : "typical",
+        depart_date: "2027-03-30", return_date: "2027-04-06",
+        airline: ["TAP Air Portugal", "LOT", "TAP Air Portugal", "Lufthansa", "LOT", "TAP Air Portugal"][Math.floor(rand() * 6)],
+        source: "google",
       });
     }
   }
@@ -93,8 +99,8 @@ const timing = {
 
 const alerts = [
   {
-    id: 1, watch_id: 1, origin: "KTW", destination: "SKG", depart_date: "2027-02-01",
-    return_date: "2027-02-07", price: 846, baseline_price: 975, drop_pct: 13.2, currency: "PLN",
+    id: 1, watch_id: 1, origin: "WAW", destination: "LIS", depart_date: "2027-03-30",
+    return_date: "2027-04-06", price: 1118, baseline_price: 1290, drop_pct: 13.3, currency: "PLN",
     sent_at: new Date().toISOString(),
   },
 ];
@@ -102,30 +108,29 @@ const alerts = [
 function trips(watchId) {
   const rand = rng(watchId * 97);
   const list = [];
-  const routes = watchId === 1 ? [["KTW", "SKG"]] : [["KTW", "BCN"], ["KTW", "AGP"], ["KTW", "MAD"]];
+  const lisbon = watchId === 1;
+  const routes = lisbon ? [["WAW", "LIS"]] : [["KRK", "BCN"], ["KRK", "AGP"], ["KRK", "VLC"]];
   for (let i = 0; i < 10; i++) {
     const [origin, destination] = routes[i % routes.length];
-    const start = watchId === 1 ? 29 + Math.floor(rand() * 9) : 15 + Math.floor(rand() * 40);
-    const depart = watchId === 1
-      ? new Date(Date.UTC(2027, 0, start))
-      : new Date(Date.UTC(2027, 3, start));
-    const nights = 5 + Math.floor(rand() * 3);
+    const depart = lisbon
+      ? new Date(Date.UTC(2027, 2, 27 + Math.floor(rand() * 7)))
+      : new Date(Date.UTC(2027, 4, 1 + Math.floor(rand() * 23)));
+    const nights = lisbon ? 6 + Math.floor(rand() * 3) : 4 + Math.floor(rand() * 4);
     const ret = new Date(depart.getTime() + nights * 86_400_000);
-    const stops = watchId === 1 ? (rand() < 0.3 ? 0 : 1) : 0;
-    const google = watchId === 1;
+    const stops = lisbon ? (rand() < 0.5 ? 0 : 1) : 0;
     list.push({
       origin, destination,
-      source: google ? "google" : "travelpayouts",
-      checked_on: isoDaysAgo(google ? i % 5 : 0),
-      price_level: google ? "typical" : null,
+      source: lisbon ? "google" : "travelpayouts",
+      checked_on: isoDaysAgo(lisbon ? i % 5 : 0),
+      price_level: lisbon ? "typical" : null,
       depart_date: depart.toISOString().slice(0, 10),
       return_date: ret.toISOString().slice(0, 10),
-      price: Math.round((watchId === 1 ? 850 : 480) + rand() * 300),
+      price: Math.round((lisbon ? 1120 : 480) + rand() * 300),
       currency: "PLN",
-      airline: stops ? "LO" : (watchId === 1 ? "A3" : "FR"),
+      airline: lisbon ? (stops ? "Lufthansa" : (rand() < 0.5 ? "TAP Air Portugal" : "LOT")) : (rand() < 0.5 ? "FR" : "W6"),
       transfers: stops,
-      duration_to: stops ? 300 + Math.floor(rand() * 80) : 180,
-      duration_back: stops ? 310 + Math.floor(rand() * 70) : 185,
+      duration_to: stops ? 270 + Math.floor(rand() * 30) : 255,
+      duration_back: stops ? 280 + Math.floor(rand() * 20) : 250,
       link: null,
     });
   }
@@ -138,7 +143,7 @@ export async function demoApi(method, path) {
       watches, daily, alerts, points, timing,
       google: {
         enabled: true, freshDays: 12, searchesToday: 3, dailyLimit: 3,
-        account: { searchesLeft: 64, usedThisMonth: 36 }, coverage: { 1: { checked: 27, total: 33 } },
+        account: { searchesLeft: 64, usedThisMonth: 36 }, coverage: { 1: { checked: 27, total: 34 } },
       },
       runs: points.slice(-30).reverse().map((p) => ({
         id: p.run_id, trigger: p.run_id % 7 === 0 ? "manual" : "schedule", started_at: p.checked_at,

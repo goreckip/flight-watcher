@@ -5,7 +5,7 @@ import type { DailyBest } from "../supabase/functions/_shared/digest.ts";
 import type { Watch } from "../supabase/functions/check-prices/logic.ts";
 
 const watch: Watch = {
-  id: 1, name: "Winter break trip", origins: ["KTW"], destinations: ["SKG"],
+  id: 1, name: "Winter break", origins: ["KTW"], destinations: ["SKG"],
   depart_from: "2027-01-29", depart_to: "2027-02-09", return_by: "2027-02-14",
   stay_min: 5, stay_max: 7, max_transfers: 1, max_leg_minutes: 390,
   drop_pct: 10, currency: "PLN", adults: 2, child_ages: [4, 8, 11],
@@ -48,7 +48,7 @@ test("sparkline scales to the range and marks gaps", () => {
 test("digest subject and HTML use the group total", () => {
   const stats = weeklyStats([row("2026-09-18", 1200), row("2026-09-25", 1076)], "2026-09-25");
   const items = [{ watch, stats, topFares: [], coverage: { checked: 3, total: 33 }, alertsThisWeek: 0 }];
-  assert.equal(digestSubject(items), "Weekly flight summary: Winter break trip 5,380 PLN for 5 (▼10.3%)");
+  assert.equal(digestSubject(items), "Weekly flight summary: Winter break 5,380 PLN for 5 (▼10.3%)");
   const html = digestHtml(items, { dashboardUrl: "https://example.test/", searchesLeft: 90 });
   assert.match(html, /Cheapest now/);
   assert.match(html, /3 of 33 date options/);

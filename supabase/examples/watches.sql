@@ -1,5 +1,5 @@
 -- Watches. Paste into Supabase → SQL Editor and run.
--- Codes can be airports (KTW, SKG) or cities (WAW = Chopin + Modlin, TYO = Narita + Haneda).
+-- Codes can be airports (KRK, LIS) or cities (WAW = Chopin + Modlin, TYO = Narita + Haneda).
 --   max_transfers   : stops allowed per direction (0 = direct only)
 --   max_leg_minutes : max journey time per direction, including the connection (null = no limit)
 --   adults / child_ages : used for the estimated family total in alerts
@@ -11,17 +11,17 @@ insert into public.watches
   (name, origins, destinations, depart_from, depart_to, return_by, stay_min, stay_max,
    max_transfers, max_leg_minutes, adults, child_ages, drop_pct)
 values
-  -- Katowice → Thessaloniki, winter break 2027: 5–7 nights, back by 14 Feb, max 1 stop, max 6h30 each way, 2 adults + 3 kids
-  ('Winter break trip', '{KTW}', '{SKG}', '2027-01-29', '2027-02-09', '2027-02-14', 5, 7,
-   1, 390, 2, '{4,8,11}', 10);
+  -- Warsaw → Lisbon over Easter 2027: 6–9 nights, back by 11 Apr, max 1 stop, max 5h each way, 2 adults + 2 kids
+  ('Lisbon spring break', '{WAW}', '{LIS}', '2027-03-27', '2027-04-05', '2027-04-11', 6, 9,
+   1, 300, 2, '{6,10}', 10);
 
--- More ideas for later:
--- ('Spain from Katowice', '{KTW}', '{BCN,AGP,MAD}', '2027-04-15', '2027-06-15', 5, 8, 0, null, 1, '{}', 10),
--- ('Japan spring 2027', '{KTW,WAW,BER}', '{TYO,OSA}', '2027-04-01', '2027-06-16', 14, 28, 1, null, 1, '{}', 10)
+-- More ideas (same columns as above):
+-- ('Spain in May', '{KRK}', '{BCN,AGP,VLC}', '2027-05-01', '2027-05-24', '2027-05-31', 4, 7, 0, null, 2, '{}', 10),
+-- ('Japan spring 2027', '{KRK,WAW,BER}', '{TYO,OSA}', '2027-04-01', '2027-06-16', '2027-06-30', 14, 28, 1, null, 1, '{}', 10)
 
 -- Handy queries:
 -- select * from watches;
 -- update watches set active = false where id = 1;
--- select * from route_daily_min where watch_id = 1 order by checked_on;
+-- select * from route_daily_best where watch_id = 1 order by checked_on;
 -- select * from price_snapshots where watch_id = 1 and checked_on = current_date order by price;
 -- select * from alerts order by sent_at desc;

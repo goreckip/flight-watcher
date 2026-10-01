@@ -99,7 +99,7 @@ test("ticketsToTrips allows up to max_transfers stops", () => {
 
 test("ticketsToTrips enforces max journey time per direction", () => {
   const req = { origin: "KTW", destination: "SKG", month: "2027-02" };
-  const athens = { ...spain, depart_from: "2027-01-29", depart_to: "2027-02-14", max_transfers: 1, max_leg_minutes: 390 };
+  const winter = { ...spain, depart_from: "2027-01-29", depart_to: "2027-02-14", max_transfers: 1, max_leg_minutes: 390 };
   const trips = ticketsToTrips(
     [
       ticket("2027-02-01", "2027-02-07", 900, { transfers: 1, return_transfers: 1, duration_to: 330, duration_back: 385 }), // ok
@@ -109,7 +109,7 @@ test("ticketsToTrips enforces max journey time per direction", () => {
       ticket("2027-02-03", "2027-02-09", 800), // direct with unknown time: kept
     ],
     req,
-    athens,
+    winter,
     "2026-09-25",
   );
   assert.deepEqual(trips.map((t) => t.price).sort(), [800, 900]);
@@ -118,21 +118,21 @@ test("ticketsToTrips enforces max journey time per direction", () => {
 
 test("ticketsToTrips rejects returns after return_by", () => {
   const req = { origin: "KTW", destination: "SKG", month: "2027-02" };
-  const athens = { ...spain, depart_from: "2027-01-29", depart_to: "2027-02-09", return_by: "2027-02-14", stay_min: 5, stay_max: 7 };
+  const winter = { ...spain, depart_from: "2027-01-29", depart_to: "2027-02-09", return_by: "2027-02-14", stay_min: 5, stay_max: 7 };
   const trips = ticketsToTrips(
     [
       ticket("2027-02-07", "2027-02-14", 500), // back on the last day: ok
       ticket("2027-02-09", "2027-02-15", 400), // back one day late
     ],
     req,
-    athens,
+    winter,
     "2026-09-25",
   );
   assert.deepEqual(trips.map((t) => t.return_date), ["2027-02-14"]);
 });
 
 test("countRejections explains why fares were dropped", () => {
-  const athens = { ...spain, depart_from: "2027-01-29", depart_to: "2027-02-09", return_by: "2027-02-14", stay_min: 5, stay_max: 7, max_transfers: 1, max_leg_minutes: 390 };
+  const winter = { ...spain, depart_from: "2027-01-29", depart_to: "2027-02-09", return_by: "2027-02-14", stay_min: 5, stay_max: 7, max_transfers: 1, max_leg_minutes: 390 };
   const counts = countRejections(
     [
       ticket("2027-02-01", "2027-02-07", 900, { transfers: 1, duration_to: 330, duration_back: 330 }), // matches
@@ -143,7 +143,7 @@ test("countRejections explains why fares were dropped", () => {
       ticket("2027-02-01", "2027-02-03", 400),
       ticket("2027-02-01", "2027-02-07", 300, { return_at: undefined }),
     ],
-    athens,
+    winter,
     "2026-09-25",
   );
   assert.deepEqual(counts, {
@@ -156,14 +156,14 @@ test("countRejections explains why fares were dropped", () => {
   });
 });
 
-const athensWatch: Watch = {
+const winterWatch: Watch = {
   ...spain, origins: ["KTW"], destinations: ["SKG"],
   depart_from: "2027-01-29", depart_to: "2027-02-09", return_by: "2027-02-14",
   stay_min: 5, stay_max: 7, max_transfers: 1, max_leg_minutes: 390, adults: 2, child_ages: [4, 8, 11],
 };
 
 test("tripCombos lists every date pair that fits, respecting back-by", () => {
-  const combos = tripCombos(athensWatch, "2026-09-25");
+  const combos = tripCombos(winterWatch, "2026-09-25");
   assert.ok(combos.every((c) => c.depart >= "2027-01-29" && c.depart <= "2027-02-09"));
   assert.ok(combos.every((c) => c.ret <= "2027-02-14"));
   assert.deepEqual(combos[0], { depart: "2027-01-29", ret: "2027-02-03" });
@@ -173,7 +173,7 @@ test("tripCombos lists every date pair that fits, respecting back-by", () => {
 });
 
 test("pickCombos: cheapest first, then never-checked, then stalest; skips today's", () => {
-  const combos = tripCombos(athensWatch, "2026-09-25");
+  const combos = tripCombos(winterWatch, "2026-09-25");
   const key = (d: string, r: string) => `${d}|${r}`;
   const last = new Map<string, string>([
     [key("2027-01-29", "2027-02-03"), "2026-09-20"],
@@ -194,8 +194,8 @@ test("pickCombos: cheapest first, then never-checked, then stalest; skips today'
 });
 
 test("googlePassengers buckets ages the way Google Flights does", () => {
-  assert.deepEqual(googlePassengers(athensWatch), { adults: 2, children: 3, infants_on_lap: 0 });
-  assert.deepEqual(googlePassengers({ ...athensWatch, child_ages: [1, 5, 13] }), { adults: 3, children: 1, infants_on_lap: 1 });
+  assert.deepEqual(googlePassengers(winterWatch), { adults: 2, children: 3, infants_on_lap: 0 });
+  assert.deepEqual(googlePassengers({ ...winterWatch, child_ages: [1, 5, 13] }), { adults: 3, children: 1, infants_on_lap: 1 });
 });
 
 test("payingSeats counts adults and children aged 2+", () => {

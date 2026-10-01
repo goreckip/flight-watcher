@@ -6,7 +6,7 @@ Your own flight price tracker: it checks the trips you care about three times a 
 
 ## What it does
 
-- **Watches:** you describe a trip, e.g. *"Katowice → Thessaloniki, leave from 29 Jan, back by 14 Feb, 5–7 nights, at most 1 stop and 6h30 each way, 2 adults + kids aged 4, 8 and 11"*.
+- **Watches:** you describe a trip, e.g. *"Warsaw → Lisbon over Easter: leave from 27 March, back by 11 April, 6–9 nights, at most 1 stop and 5 hours each way, 2 adults + kids aged 6 and 10"*.
 - **Checks prices three times a day** (07:17, 14:05, 20:05 in your time zone) from two sources:
   - **Google Flights** (via SerpApi): live prices for exact dates, priced for your whole group.
   - **Aviasales cache** (via Travelpayouts): free and broad, best for dates in the next few weeks.

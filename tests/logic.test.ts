@@ -11,6 +11,8 @@ import {
   monthsBetween,
   payingSeats,
   pickCombos,
+  stayLabel,
+  stayRangeLabel,
   ticketsToTrips,
   tripCombos,
 } from "../supabase/functions/check-prices/logic.ts";
@@ -191,6 +193,37 @@ test("pickCombos: cheapest first, then never-checked, then stalest; skips today'
   allChecked.set(key("2027-02-02", "2027-02-08"), "2026-09-25");
   const stale = pickCombos(combos, allChecked, key("2027-02-02", "2027-02-08"), "2026-09-25", 2);
   assert.deepEqual(stale[0], { depart: "2027-01-30", ret: "2027-02-04" }); // oldest first; cheapest skipped (done today)
+});
+
+test("day trips: 0 nights means out and back on the same day", () => {
+  const dayTrip: Watch = {
+    ...spain, depart_from: "2027-03-06", depart_to: "2027-03-07", return_by: "2027-03-07",
+    stay_min: 0, stay_max: 0, max_transfers: 0,
+  };
+  assert.deepEqual(tripCombos(dayTrip, "2026-10-02"), [
+    { depart: "2027-03-06", ret: "2027-03-06" },
+    { depart: "2027-03-07", ret: "2027-03-07" },
+  ]);
+  const req = { origin: "KTW", destination: "BCN", month: "2027-03" };
+  const trips = ticketsToTrips(
+    [
+      ticket("2027-03-06", "2027-03-06", 300), // same day: ok
+      ticket("2027-03-06", "2027-03-07", 250), // 1 night: too long for a day trip
+    ],
+    req,
+    dayTrip,
+    "2026-10-02",
+  );
+  assert.deepEqual(trips.map((t) => t.price), [300]);
+});
+
+test("stay wording handles day trips", () => {
+  assert.equal(stayLabel(0), "day trip");
+  assert.equal(stayLabel(1), "1 night");
+  assert.equal(stayLabel(6), "6 nights");
+  assert.equal(stayRangeLabel(0, 0), "day trip");
+  assert.equal(stayRangeLabel(0, 2), "day trip to 2 nights");
+  assert.equal(stayRangeLabel(5, 7), "5–7 nights");
 });
 
 test("googlePassengers buckets ages the way Google Flights does", () => {

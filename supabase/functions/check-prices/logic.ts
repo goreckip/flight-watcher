@@ -63,6 +63,18 @@ export function addDays(date: string, days: number): string {
   return new Date(Date.parse(date) + days * DAY_MS).toISOString().slice(0, 10);
 }
 
+/** "day trip", "1 night", "6 nights" */
+export function stayLabel(nights: number): string {
+  return nights === 0 ? "day trip" : `${nights} night${nights === 1 ? "" : "s"}`;
+}
+
+/** A watch's stay range: "5–7 nights", "day trip", "day trip to 2 nights" */
+export function stayRangeLabel(min: number, max: number): string {
+  if (min === max) return stayLabel(min);
+  if (min === 0) return `day trip to ${stayLabel(max)}`;
+  return `${min}–${max} nights`;
+}
+
 export function daysBetween(from: string, to: string): number {
   return Math.round((Date.parse(to) - Date.parse(from)) / DAY_MS);
 }

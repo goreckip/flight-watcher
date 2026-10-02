@@ -1,5 +1,5 @@
 // Weekly summary email: pure stats + HTML, no I/O (unit-tested under Node).
-import { addDays, payingSeats, type Watch } from "../check-prices/logic.ts";
+import { addDays, payingSeats, stayLabel, stayRangeLabel, type Watch } from "../check-prices/logic.ts";
 
 /** One row of route_daily_best (best known fare for a route on a day). */
 export interface DailyBest {
@@ -98,7 +98,7 @@ const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, (c) => ESC[c]);
 const money = (n: number, cur: string) => `${Math.round(n).toLocaleString("en-GB")} ${cur}`;
 const dateFmt = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
 const short = (iso: string) => dateFmt.format(new Date(iso));
-const nights = (a: string, b: string) => Math.round((Date.parse(b) - Date.parse(a)) / 86_400_000);
+const nights = (a: string, b: string) => stayLabel(Math.round((Date.parse(b) - Date.parse(a)) / 86_400_000));
 const hours = (m: number | null) => (m ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}` : "?");
 const sourceName = (s: string) => (s === "google" ? "Google Flights" : "Aviasales cache");
 
@@ -136,7 +136,7 @@ function watchBlock(d: WatchDigest): string {
   const criteria = [
     `${watch.origins.join(", ")} → ${watch.destinations.join(", ")}`,
     `${short(watch.depart_from)} – ${short(watch.return_by ?? addDays(watch.depart_to, watch.stay_max))}`,
-    `${watch.stay_min}–${watch.stay_max} nights`,
+    stayRangeLabel(watch.stay_min, watch.stay_max),
     watch.max_transfers === 0 ? "direct only" : `≤ ${watch.max_transfers} stop${watch.max_transfers === 1 ? "" : "s"}`,
   ].map(esc).join(" · ");
 
@@ -151,7 +151,7 @@ function watchBlock(d: WatchDigest): string {
   const fares = d.topFares.map((f) => {
     const t = groupTotal(f, watch);
     return `<tr>
-      <td>${short(f.depart_date)} – ${short(f.return_date)} <span style="color:#777">(${nights(f.depart_date, f.return_date)} n)</span></td>
+      <td>${short(f.depart_date)} – ${short(f.return_date)} <span style="color:#777">(${nights(f.depart_date, f.return_date)})</span></td>
       <td>${esc(f.airline ?? "")}</td>
       <td>${f.transfers ? `${f.transfers} stop` : "direct"} · ${hours(f.duration_to)}</td>
       <td style="text-align:right"><b>${money(Number(f.price), cur)}</b></td>

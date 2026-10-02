@@ -26,6 +26,14 @@ const storage = {
 const DAY_MS = 86_400_000;
 const addDays = (iso, n) => new Date(Date.parse(iso) + n * DAY_MS).toISOString().slice(0, 10);
 const nightsBetween = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / DAY_MS);
+/** "day trip", "1 night", "6 nights" (same wording as the emails) */
+const stayLabel = (n) => (n === 0 ? "day trip" : `${n} night${n === 1 ? "" : "s"}`);
+const stayText = (a, b) => stayLabel(nightsBetween(a, b));
+function stayRangeLabel(min, max) {
+  if (min === max) return stayLabel(min);
+  if (min === 0) return `day trip to ${stayLabel(max)}`;
+  return `${min}–${max} nights`;
+}
 
 const dateFmt = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 const shortFmt = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
@@ -187,7 +195,7 @@ function statTiles(watch, s) {
     ${changeTile}
     <div class="stat"><span class="stat-label">Best dates</span>
       <span class="stat-value">${fmtShort(s.best.depart_date)} – ${fmtShort(s.best.return_date)}</span>
-      <span class="stat-sub">${esc(s.best.origin)} → ${esc(s.best.destination)} · ${nightsBetween(s.best.depart_date, s.best.return_date)} nights${s.best.airline ? ` · ${esc(airlineName(s.best.airline))}` : ""} · ${sourceLabel(s.best.source)}</span></div>
+      <span class="stat-sub">${esc(s.best.origin)} → ${esc(s.best.destination)} · ${stayText(s.best.depart_date, s.best.return_date)}${s.best.airline ? ` · ${esc(airlineName(s.best.airline))}` : ""} · ${sourceLabel(s.best.source)}</span></div>
   </div>`;
 }
 
@@ -249,7 +257,7 @@ function lowestChecksTable(watch) {
       <td class="num"><b>${money(p.price, watch.currency)}</b></td>
       ${seats > 1 ? `<td class="num">${total.exact ? "" : "~"}${money(total.amount, watch.currency)}</td>` : ""}
       <td><span class="legend-item"><span class="swatch" style="background:${colors.get(name)}"></span>${esc(name)}</span></td>
-      <td>${fmtShort(p.depart_date)} – ${fmtShort(p.return_date)} <span class="muted">(${nightsBetween(p.depart_date, p.return_date)} n)</span></td>
+      <td>${fmtShort(p.depart_date)} – ${fmtShort(p.return_date)} <span class="muted">(${stayText(p.depart_date, p.return_date)})</span></td>
       <td>${esc(p.origin)} → ${esc(p.destination)}</td>
       <td>${g.checks > 1 ? `${whenText(g.first)} → ${whenText(g.last)}` : whenText(g.first)}</td>
       <td class="num">${g.checks}</td>
@@ -318,7 +326,7 @@ function watchCard(watch) {
   const criteria = [
     `<b>${esc(watch.origins.join(", "))} → ${esc(watch.destinations.join(", "))}</b>`,
     `${fmtDate(watch.depart_from)} – ${fmtDate(back)}`,
-    `${watch.stay_min}–${watch.stay_max} nights`,
+    stayRangeLabel(watch.stay_min, watch.stay_max),
     stopsLabel(watch.max_transfers),
     watch.max_leg_minutes ? `≤ ${hours(watch.max_leg_minutes)} each way` : null,
     travellers(watch),
@@ -688,7 +696,7 @@ async function loadTrips(card, watch) {
     body.innerHTML = `<p class="muted small">Latest price for each date option: Aviasales from the last check, Google Flights from the last ${data.google?.freshDays ?? 12} days.
         Totals marked ~ are estimates (per-adult fare × seats). Confirm on the airline site before booking.</p>
       <div class="table-wrap"><table>
-        <thead><tr><th>Route</th><th>Dates</th><th class="num">Nights</th><th>Airline</th><th>Stops</th>
+        <thead><tr><th>Route</th><th>Dates</th><th>Stay</th><th>Airline</th><th>Stops</th>
           <th>Journey out</th><th class="num">Per person</th>${seats > 1 ? `<th class="num">${seats} seats</th>` : ""}
           <th>Source</th><th>Checked</th><th></th></tr></thead>
         <tbody>${trips.map((t) => {
@@ -696,7 +704,7 @@ async function loadTrips(card, watch) {
           return `<tr>
           <td>${esc(t.origin)} → ${esc(t.destination)}</td>
           <td>${fmtShort(t.depart_date)} – ${fmtShort(t.return_date)}</td>
-          <td class="num">${nightsBetween(t.depart_date, t.return_date)}</td>
+          <td>${stayText(t.depart_date, t.return_date)}</td>
           <td>${t.airline ? esc(airlineName(t.airline)) : ""}</td>
           <td>${t.transfers ? `≤ ${t.transfers}` : "Direct"}</td>
           <td>${hours(t.duration_to)}</td>
@@ -908,6 +916,7 @@ function readForm() {
 
   const stayMin = Number(f.stay_min.value);
   const stayMax = Number(f.stay_max.value);
+  if (stayMin < 0) throw new Error("Nights can't be negative (use 0 for a day trip).");
   if (stayMax < stayMin) throw new Error("Max nights must be at least min nights.");
 
   const departFrom = f.depart_from.value;

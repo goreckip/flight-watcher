@@ -79,10 +79,11 @@
       </label>
 
       <label class="field">Nights (min)
-        <input name="stay_min" type="number" min="1" max="60" required value="5">
+        <input name="stay_min" type="number" min="0" max="60" required value="5">
+        <span class="hint">0 = day trip, back the same day</span>
       </label>
       <label class="field">Nights (max)
-        <input name="stay_max" type="number" min="1" max="60" required value="7">
+        <input name="stay_max" type="number" min="0" max="60" required value="7">
       </label>
 
       <label class="field">Stops each way

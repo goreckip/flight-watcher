@@ -1,4 +1,4 @@
-import { payingSeats, type Trip, type Watch } from "./logic.ts";
+import { daysBetween, payingSeats, stayLabel, type Trip, type Watch } from "./logic.ts";
 
 /** A fare from either source. Google fares carry the real group total and a price verdict. */
 export interface AlertTrip extends Trip {
@@ -54,7 +54,6 @@ export function alertSubject(alerts: PriceAlert[]): string {
 
 export function alertHtml(alerts: PriceAlert[]): string {
   const rows = alerts.map(({ watch, trip, baseline, dropPct, reason }) => {
-    const nights = Math.round((Date.parse(trip.return_date) - Date.parse(trip.depart_date)) / 86_400_000);
     const book = trip.link ? `<a href="${escapeHtml(trip.link)}">View</a>` : "";
     const seats = payingSeats(watch);
     const total = groupTotal(trip, watch);
@@ -62,7 +61,7 @@ export function alertHtml(alerts: PriceAlert[]): string {
     return `<tr>
       <td>${escapeHtml(watch.name)}</td>
       <td><b>${escapeHtml(trip.origin)} → ${escapeHtml(trip.destination)}</b><br>
-        <small>${trip.depart_date} – ${trip.return_date} (${nights} nights)${trip.airline ? ` · ${escapeHtml(trip.airline)}` : ""}${trip.transfers ? ` · max ${trip.transfers} stop(s)` : " · direct"}<br>
+        <small>${trip.depart_date} – ${trip.return_date} (${stayLabel(daysBetween(trip.depart_date, trip.return_date))})${trip.airline ? ` · ${escapeHtml(trip.airline)}` : ""}${trip.transfers ? ` · max ${trip.transfers} stop(s)` : " · direct"}<br>
         Journey out: ${hours(trip.duration_to)} · Source: ${source}${trip.price_level ? ` · Google says prices are <b>${escapeHtml(trip.price_level)}</b>` : ""}</small></td>
       <td><b>${money(trip.price, watch.currency)}</b> / person${seats > 1 ? `<br><small>${total.exact ? "" : "~"}${money(total.amount, watch.currency)} for ${seats} seats${total.exact ? " (Google total)" : ""}</small>` : ""}</td>
       <td>${money(baseline, watch.currency)}<br><small style="color:#666">${reason === "new-low" ? "previous lowest" : "median of recent checks"}</small></td>

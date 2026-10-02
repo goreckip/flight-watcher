@@ -77,6 +77,12 @@ const points = (() => {
       });
     }
   }
+  // End on a new lowest price, so the demo shows what an alert-worthy drop looks like.
+  const last = list.at(-1);
+  last.price = Math.round(Math.min(...list.map((p) => p.price)) * 0.95);
+  last.price_total = last.price * SEATS_LISBON;
+  last.price_level = "low";
+  last.airline = "TAP Air Portugal";
   return list;
 })();
 
